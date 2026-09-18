@@ -1,0 +1,25 @@
+{
+  "name": "aether-chess",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "纯 JS 国际象棋引擎:零依赖、无 DOM,Node 与 Worker 通用;PVS/TT/静态搜索 + Texel 调参的 491 参数 HCE 评估",
+  "main": "src/ai.js",
+  "exports": {
+    ".": "./src/ai.js",
+    "./rules": "./src/rules.js",
+    "./ai": "./src/ai.js",
+    "./eval": "./src/eval.js",
+    "./worker": "./src/worker.js"
+  },
+  "scripts": {
+    "test": "node test/engine-test.mjs",
+    "test:quick": "node test/engine-test.mjs --quick"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git@github.com:suulnnka/AetherChess.git"
+  },
+  "keywords": ["chess", "engine", "pvs", "evaluation", "texel-tuning"],
+  "private": false
+}

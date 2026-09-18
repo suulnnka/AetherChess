@@ -1,0 +1,16 @@
+{
+  "name": "aether-chess-eval-tuner",
+  "version": "1.0.0",
+  "description": "AetherChess 评估函数调参:数据采样、闭式 ridge 拟合、A/B 自对弈验证",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "hyparquet": "^1.31.1"
+  }
+}

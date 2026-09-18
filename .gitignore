@@ -1,0 +1,8 @@
+node_modules/
+# 对弈基准用的第三方引擎二进制/产物(Stockfish、chessy 的 wasm 等),不入库
+bench/vendor/
+# 调参抽样数据(由 tuner/sample-lichess-dataset.mjs 固定种子重生成),不入库
+tuner/data/
+# 运行日志不入库;tuner/results/ 下的历史产物日志除外(训练记录,入库)
+*.log
+!tuner/results/*.log
