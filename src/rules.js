@@ -59,6 +59,47 @@ const KD = new Int8Array([1, 0, -1, 0, 0, 1, 0, -1, 1, 1, 1, -1, -1, 1, -1, -1])
 const DD = new Int8Array([1, 1, 1, -1, -1, 1, -1, -1]);
 const OD = new Int8Array([1, 0, -1, 0, 0, 1, 0, -1]);
 
+/* ---------- 预计算攻击表(纯速度,行为与方向数组逐位等价) ----------
+ * N_ATK/K_ATK:每个格子被马/王攻击到的格子列表(扁平 + 起止偏移)。
+ * DIAG_RAY/ORTHO_RAY:每个格子沿 4 条斜线/正线的射线格子序列(离源格由近及远)。
+ * attacked() 是热路径(inCheck 每节点一次),表格化消掉全部边界判断。 */
+export const N_ATK = new Int8Array(64 * 8), N_ATK_LO = new Int32Array(65);
+export const K_ATK = new Int8Array(64 * 8), K_ATK_LO = new Int32Array(65);
+export const DIAG_RAY = new Int8Array(64 * 13), DIAG_SEG = new Int32Array(64 * 5);
+export const ORTHO_RAY = new Int8Array(64 * 14), ORTHO_SEG = new Int32Array(64 * 5);
+{
+  const build = (targets, los, hit) => {
+    let n = 0;
+    for (let s = 0; s < 64; s++) {
+      los[s] = n;
+      const r = s >> 3, c = s & 7;
+      for (let i = 0; i < 16; i += 2) {
+        const rr = r + hit[i], cc = c + hit[i + 1];
+        if (rr >= 0 && rr < 8 && cc >= 0 && cc < 8) targets[n++] = rr * 8 + cc;
+      }
+    }
+    los[64] = n;
+  };
+  build(N_ATK, N_ATK_LO, ND);
+  build(K_ATK, K_ATK_LO, KD);
+  /* 射线表按「格 × 方向」分段(SEG[s*4+d] .. SEG[s*4+d+1]):每条射线独立
+   * 走到第一个子为止 —— 与方向数组版的每方向独立 while 完全等价。 */
+  const buildRay = (targets, segs, hit) => {
+    let n = 0;
+    for (let s = 0; s < 64; s++) {
+      const r = s >> 3, c = s & 7;
+      for (let d = 0; d < 4; d++) {
+        segs[s * 4 + d] = n;
+        let rr = r + hit[d * 2], cc = c + hit[d * 2 + 1];
+        while (rr >= 0 && rr < 8 && cc >= 0 && cc < 8) { targets[n++] = rr * 8 + cc; rr += hit[d * 2]; cc += hit[d * 2 + 1]; }
+      }
+      segs[s * 4 + 4] = n;
+    }
+  };
+  buildRay(DIAG_RAY, DIAG_SEG, DD);
+  buildRay(ORTHO_RAY, ORTHO_SEG, OD);
+}
+
 /* ============================================================
  * Zobrist
  * 索引区间:棋子 (编码<<6)|格 → 0..1023;1024 走子权;1025..1040 易位权;
@@ -100,7 +141,7 @@ export function newPos() {
     ks: new Int8Array(2),
     hist: [],
     ply: 0,
-    undo: new Int32Array(6 * 256),
+    undo: new Int32Array(6 * 512),   // 对局 ply(50 步规则下可达 ~400)+ 搜索 62 层;256 不够长局用,越界会让 unmake 恢复出垃圾
   };
   const back = [ROOK, KNIGHT, BISHOP, QUEEN, KING, BISHOP, KNIGHT, ROOK];
   for (let c = 0; c < 8; c++) {
@@ -139,6 +180,7 @@ export function loadPosition(pos, cells, stm, castle, ep) {
     const p = pos.b[s];
     if (p && (p & 7) === KING) pos.ks[p >> 3] = s;
   }
+  if (pos.evS) evRebuild(pos);
   recomputeKeys(pos);
   return pos;
 }
@@ -146,43 +188,32 @@ export function loadPosition(pos, cells, stm, castle, ep) {
 /* ============================================================
  * 攻击判定
  * ============================================================ */
+import { evAfterMake, evBeforeUnmake, evRebuild, evAfterMakeNull, evBeforeUnmakeNull } from './eval.js';
+
 export function attacked(b, sq, by) {
-  const r = sq >> 3, c = sq & 7;
-  const pawn = piece(by, PAWN);
-  // 兵:白兵在白方视角"上一行",即 r+1
-  const pr = r + (by === WHITE ? 1 : -1);
+  // 兵:白兵在白方视角"上一行"(r+1)
+  const pr = (sq >> 3) + (by === WHITE ? 1 : -1);
   if (pr >= 0 && pr < 8) {
-    const base = pr * 8;
+    const pawn = piece(by, PAWN), base = pr * 8, c = sq & 7;
     if (c > 0 && b[base + c - 1] === pawn) return true;
     if (c < 7 && b[base + c + 1] === pawn) return true;
   }
   const kn = piece(by, KNIGHT);
-  for (let i = 0; i < 16; i += 2) {
-    const rr = r + ND[i], cc = c + ND[i + 1];
-    if (rr >= 0 && rr < 8 && cc >= 0 && cc < 8 && b[rr * 8 + cc] === kn) return true;
-  }
+  for (let i = N_ATK_LO[sq]; i < N_ATK_LO[sq + 1]; i++) if (b[N_ATK[i]] === kn) return true;
   const kg = piece(by, KING);
-  for (let i = 0; i < 16; i += 2) {
-    const rr = r + KD[i], cc = c + KD[i + 1];
-    if (rr >= 0 && rr < 8 && cc >= 0 && cc < 8 && b[rr * 8 + cc] === kg) return true;
-  }
+  for (let i = K_ATK_LO[sq]; i < K_ATK_LO[sq + 1]; i++) if (b[K_ATK[i]] === kg) return true;
   const bi = piece(by, BISHOP), qu = piece(by, QUEEN), ro = piece(by, ROOK);
-  for (let i = 0; i < 8; i += 2) {
-    const dr = DD[i], dc = DD[i + 1];
-    let rr = r + dr, cc = c + dc;
-    while (rr >= 0 && rr < 8 && cc >= 0 && cc < 8) {
-      const v = b[rr * 8 + cc];
+  const d0 = sq * 4;
+  for (let dir = 0; dir < 4; dir++) {
+    for (let i = DIAG_SEG[d0 + dir]; i < DIAG_SEG[d0 + dir + 1]; i++) {
+      const v = b[DIAG_RAY[i]];
       if (v) { if (v === bi || v === qu) return true; break; }
-      rr += dr; cc += dc;
     }
   }
-  for (let i = 0; i < 8; i += 2) {
-    const dr = OD[i], dc = OD[i + 1];
-    let rr = r + dr, cc = c + dc;
-    while (rr >= 0 && rr < 8 && cc >= 0 && cc < 8) {
-      const v = b[rr * 8 + cc];
+  for (let dir = 0; dir < 4; dir++) {
+    for (let i = ORTHO_SEG[d0 + dir]; i < ORTHO_SEG[d0 + dir + 1]; i++) {
+      const v = b[ORTHO_RAY[i]];
       if (v) { if (v === ro || v === qu) return true; break; }
-      rr += dr; cc += dc;
     }
   }
   return false;
@@ -345,9 +376,11 @@ export function make(pos, m) {
   pos.stm ^= 1;
   a ^= ZA[1024]; bb ^= ZB[1024];
   pos.keyA = a; pos.keyB = bb;
+  if (pos.evS) evAfterMake(pos, m);
 }
 
 export function unmake(pos, m) {
+  if (pos.evS) evBeforeUnmake(pos);
   pos.ply--;
   const u = pos.undo, k = pos.ply * 6;
   const cap = u[k], castle = u[k + 1], ep = u[k + 2], half = u[k + 3];
@@ -383,8 +416,10 @@ export function makeNull(pos) {
   pos.keyA = a; pos.keyB = bb;
   pos.stm ^= 1;
   pos.half++;
+  if (pos.evS) evAfterMakeNull(pos);
 }
 export function unmakeNull(pos) {
+  if (pos.evS) evBeforeUnmakeNull(pos);
   pos.ply--;
   const u = pos.undo, k = pos.ply * 6;
   pos.ep = u[k + 2]; pos.half = u[k + 3];
