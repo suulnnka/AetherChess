@@ -3,6 +3,5 @@ node_modules/
 bench/vendor/
 # 调参抽样数据(由 tuner/sample-lichess-dataset.mjs 固定种子重生成),不入库
 tuner/data/
-# 运行日志不入库;tuner/results/ 下的历史产物日志除外(训练记录,入库)
+# 运行/对局日志一律不入库(tuner/results/ 本地留档);关键数据以 docs 文档为准
 *.log
-!tuner/results/*.log

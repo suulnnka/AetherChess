@@ -14,7 +14,7 @@
 | `fit-eval.mjs` | **训练器**:闭式 ridge(向手写先验收缩)+ 覆盖度闸门 + 钉参考格 + 失衡行降权 + 符号投影,产出 `data/fitted-params.*` |
 | `duel.mjs` | A/B 自对弈(拟合版 vs 基线,开局自动生成,固定节点预算,多 worker) |
 | `baseline/ai-baseline.mjs` | 从 git HEAD 提取的改造前引擎(duel 的对照,A/B 的"旧") |
-| `results/` | **入库的产物**:fit-run.log(最终拟合运行原文)、duel-400.log(A/B 全程)、fitted-params.json/.js.txt(参数与元数据)。`data/` gitignore,这里的副本是持久记录 |
+| `results/` | **入库的产物**:fitted-params.json/.js.txt(拟合参数与元数据)。运行/对局日志(`*.log`)**不入库**,仅本地留档;关键数据以 `docs/chess-eval-training-report.md` 为准。`data/` gitignore |
 
 ## 训练流水线
 
