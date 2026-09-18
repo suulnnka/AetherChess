@@ -1,8 +1,11 @@
 # AetherChess
 
 纯 JavaScript 国际象棋引擎:零依赖、无 DOM、Node 与浏览器 Worker 通用。
-从一个类 DSM 的纯前端 WebOS 项目([webos](https://github.com/suulnnka) 的 `chess3d` 应用)中抽离而来,
+从 [WebOS](<https://github.com/suulnnka/AetherWebOS>)(纯前端网页操作系统)的 3D 国际象棋应用中抽离而来,
 棋规、搜索、评估、调参、对弈基准全部自研,不借鉴任何开源引擎代码。
+
+**在线体验:** 打开 <https://suulnnka.github.io/AetherWebOS/> 启动「3D 国际象棋」应用 —— 那里面跑的就是本引擎
+(Worker 后台思考,四档强度,状态栏实时显示深度/节点数/评分)。
 
 ## 引擎构成
 
