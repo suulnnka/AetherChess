@@ -18,7 +18,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git@github.com:suulnnka/AetherChess.git"
+    "url": "https://github.com/suulnnka/AetherChess.git"
   },
   "keywords": ["chess", "engine", "pvs", "evaluation", "texel-tuning"],
   "private": false
