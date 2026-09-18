@@ -30,15 +30,17 @@ export { evaluate } from './eval.js';
  *   jitter 低档专用:在"最优着法 N 分以内"的着法里随机挑一个。
  *          比给评分加随机噪声正统 —— 弱得可控,同一局面不会前后矛盾。
  *
- * 节点预算是按本机实测标定的(NPS 约 20~45 万):
- *   40k ≈ 0.24s / 7 层 · 160k ≈ 0.36s / 9 层 · 1200k ≈ 2.5s / 11~12 层
+ * 节点预算按本机实测标定(评估升级后 NPS ≈ 27.5 万):
+ *   40k ≈ 0.15s / 7 层 · 160k ≈ 0.6s / 9 层 · 900k ≈ 3.1s / 11~12 层
+ * master 取 900k:3.5s 兜底内能干净跑完的量(旧值 1200k 在本机永远被时间截断,
+ * 标称虚高且迭代常被拦腰砍断;900k 实测 4/6 局面跑满预算,强度与旧值实际相当)。
  * 换机器时棋力会漂,但**同一台机器上是可复现的** —— 这是选节点而非时间做主预算的原因。
  * ============================================================ */
 export const LEVELS = [
   { id: 'easy', name: '初级', depth: 2, jitter: 70, nodes: 20000, ms: 200 },
   { id: 'normal', name: '中级', depth: 24, jitter: 0, nodes: 40000, ms: 500 },
   { id: 'hard', name: '高级', depth: 24, jitter: 0, nodes: 160000, ms: 900 },
-  { id: 'master', name: '大师', depth: 24, jitter: 0, nodes: 1200000, ms: 3500 },
+  { id: 'master', name: '大师', depth: 24, jitter: 0, nodes: 900000, ms: 3500 },
 ];
 export const DEFAULT_LEVEL = 2;
 
@@ -330,10 +332,7 @@ function search(pos, depth, alpha, beta, ply, canNull) {
     // 静着剪枝:只在非主变、未被将、且已经搜过着法时启用,并避开杀分区间
     if (quiet && !pvNode && !inC && tried > 0 && Math.abs(alpha) < MATE_B) {
       if (depth <= 2 && staticEval + SCALE.FUTILITY * depth <= alpha) continue;          // futility
-      // 迟着剪枝(LMP):放开原来的"只到深度 3"(§9.8 重测:评估升级后同深度
-      // 省 37~54% 节点的组合之一;improving 缩放不引入 —— 静态赢棋里 improving
-      // 恒假,当年 LMR 就是死在它手里)
-      if (tried >= 4 + depth * depth) continue;
+      if (depth <= 3 && tried >= 4 + depth * depth) continue;                 // 迟着剪枝
     }
 
     make(pos, m);
@@ -343,10 +342,7 @@ function search(pos, depth, alpha, beta, ply, canNull) {
     } else {
       let r = 0;
       if (quiet && depth >= 3 && tried >= 3 && !inC) {
-        // 对数 LMR(§9.8):r = 0.75 + ln(depth)·ln(tried)/2.25,不带 improving 档。
-        // 台阶式 r∈{0,1,2} 换成连续曲线,深处靠后的静着减得更多
-        r = Math.round(0.75 + Math.log(depth) * Math.log(tried) / 2.25);
-        if (r > depth - 2) r = depth - 2;
+        r = 1 + (tried > 5 + depth * 2 ? 1 : 0);                             // LMR
         if (pvNode) r--;
         if (r < 0) r = 0;
       }
@@ -395,6 +391,10 @@ function search(pos, depth, alpha, beta, ply, canNull) {
  * 返回 { move, score(白方视角厘兵), depth, nodes, ms }
  * ============================================================ */
 export function searchBest(pos, cfg) {
+  // 增量评估默认不启用:JS 数组棋盘上每 make 的受影响子重扫(~3µs × 每节点 ~4 次 make)
+  // 比它省下的全量评估(2.7µs/节点)更贵,实测 NPS 275k → 93k。
+  // 状态机与验证(test/incremental-test.mjs,4.2 万步逐位一致)保留,位棋板/WASM 化后可激活:
+  // 需要时 evAttach(pos) 即可。
   nodes = 0; stopped = false; bestRoot = 0;
   nodeLimit = cfg.nodes || 40000;
   const t0 = nowFn();
