@@ -8,12 +8,14 @@
     ".": "./src/ai.js",
     "./rules": "./src/rules.js",
     "./ai": "./src/ai.js",
+    "./book": "./src/book.js",
     "./eval": "./src/eval.js",
     "./worker": "./src/worker.js"
   },
   "scripts": {
     "test": "node test/engine-test.mjs",
-    "test:quick": "node test/engine-test.mjs --quick"
+    "test:quick": "node test/engine-test.mjs --quick",
+    "test:book": "node test/book-test.mjs"
   },
   "license": "MIT",
   "repository": {
