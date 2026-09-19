@@ -7,6 +7,27 @@
 **在线体验:** 打开 <https://suulnnka.github.io/AetherWebOS/> 启动「3D 国际象棋」应用 —— 那里面跑的就是本引擎
 (Worker 后台思考,四档强度,状态栏实时显示深度/节点数/评分)。
 
+## 在线对弈页(GitHub Pages)
+
+本仓库自带一个**开箱即玩的对弈页**:布局与交互取自 WebOS 的国际象棋应用,
+同一份 Worker 契约接的也是本仓库的引擎 —— wasm 通道(zig → chess.wasm),含编译期内嵌开局谱库。每次推送由 GitHub Actions
+自动部署(`.github/workflows/deploy-pages.yml`):
+
+**<https://suulnnka.github.io/AetherChess/>**
+
+页面即仓库布局:`index.html`(根)+ `pages/`(页面资产),引擎入口在 `src/`、
+wasm 在 `wasm/`,全部按相对路径引用 —— 本地预览无需构建,仓库根起任意静态
+服务器即可:
+
+```bash
+python3 -m http.server 8000     # 仓库根起服
+# 打开 http://localhost:8000/
+```
+
+功能与 WebOS 应用一致:新对局 / 难度(引擎自报表)/ 人机或双人 / 换边 / 悔棋
+(开局库谱着直出,将死 / 逼和 / 子力不足 / 三次重复自动判终局),底栏左侧行棋状态、右侧实时引擎搜索信息。
+
+
 ## 两条分支:一个接口,两份实现
 
 - `main`(本分支)—— 在 JS 实现之上多一份 Zig/wasm 实现(`src/zig/*` →
