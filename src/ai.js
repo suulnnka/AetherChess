@@ -22,27 +22,10 @@ import {
 import { evaluate, EVAL_P, EVAL_IDX } from './eval.js';
 export { evaluate } from './eval.js';
 
-/* ============================================================
- * 难度档
- *   nodes  节点上限(主约束,确定性)
- *   ms     墙上时间兜底(慢机器上不至于卡死)
- *   depth  深度上限
- *   jitter 低档专用:在"最优着法 N 分以内"的着法里随机挑一个。
- *          比给评分加随机噪声正统 —— 弱得可控,同一局面不会前后矛盾。
- *
- * 节点预算按本机实测标定(评估升级后 NPS ≈ 27.5 万):
- *   40k ≈ 0.15s / 7 层 · 160k ≈ 0.6s / 9 层 · 900k ≈ 3.1s / 11~12 层
- * master 取 900k:3.5s 兜底内能干净跑完的量(旧值 1200k 在本机永远被时间截断,
- * 标称虚高且迭代常被拦腰砍断;900k 实测 4/6 局面跑满预算,强度与旧值实际相当)。
- * 换机器时棋力会漂,但**同一台机器上是可复现的** —— 这是选节点而非时间做主预算的原因。
- * ============================================================ */
-export const LEVELS = [
-  { id: 'easy', name: '初级', depth: 2, jitter: 70, nodes: 20000, ms: 200 },
-  { id: 'normal', name: '中级', depth: 24, jitter: 0, nodes: 40000, ms: 500 },
-  { id: 'hard', name: '高级', depth: 24, jitter: 0, nodes: 160000, ms: 900 },
-  { id: 'master', name: '大师', depth: 24, jitter: 0, nodes: 900000, ms: 3500 },
-];
-export const DEFAULT_LEVEL = 2;
+/* 难度档的数据与标定说明在 levels.js(纯数据零依赖,UI 只渲染难度下拉时
+ * 直接 import 那边,免得把本文件的 eval/search 连坐进 UI chunk);
+ * 这里 re-export 维持旧路径,worker / bench / 调参器不用改 import。 */
+export { LEVELS, DEFAULT_LEVEL } from './levels.js';
 
 /* ============================================================
  * 评估
