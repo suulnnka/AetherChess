@@ -212,7 +212,7 @@ function jsState(pos) {
     if (n === 0) return [];
     const raw = new Int32Array(X.memory.buffer, X.engineBookCandPtr(), n * 3);
     return Array.from(raw).reduce((acc, _, i, all) => {
-      if (i % 3 === 0) acc.push({ line: all[i], w: all[i + 1], fam: all[i + 2] });
+      if (i % 3 === 0) acc.push({ line: all[i], pop: all[i + 1], fam: all[i + 2] });
       return acc;
     }, []);
   };
@@ -228,10 +228,14 @@ function jsState(pos) {
     const seq = [];
     for (let p = 0; p < 30; p++) {
       const js = bookCandidates(seq.map((l) => NAMEQ(l >> 6) + NAMEQ(l & 63)));
+      /* 权重比的是**量化档位**:wasm 不存精确谱线数,存 2 位流行度
+       * (1:10:100:1000,n=10 全谱拟合,见 tools/gen-book.mjs);JS 侧按
+       * 同一公式把 w 换算成期望档位再比 —— 精确权重则有意不比 */
+      const popClass = (w) => Math.max(0, Math.min(3, Math.round(Math.log(w) / Math.log(10))));
       const jsList = (js || []).map((c) => {
         const from = 'abcdefgh'.indexOf(c.move[0]) + (8 - +c.move[1]) * 8;
         const to = 'abcdefgh'.indexOf(c.move[2]) + (8 - +c.move[3]) * 8;
-        return { line: (from << 6) | to, w: c.w, name: c.name };
+        return { line: (from << 6) | to, pop: popClass(c.w), name: c.name };
       });
       const wasmList = wasmCands(seq);
       if (jsList.length !== wasmList.length) {
@@ -242,7 +246,7 @@ function jsState(pos) {
       for (let i = 0; i < jsList.length; i++) {
         const j = jsList[i], w = wasmList[i];
         const wName = w.fam < 0 ? null : wasmFamName(w.fam);
-        if (j.line !== w.line || j.w !== w.w || (j.name || null) !== wName) {
+        if (j.line !== w.line || j.pop !== w.pop || (j.name || null) !== wName) {
           ok(false, `谱库游走 ${g} 第 ${p} 手第 ${i} 个候选不一致:js=${JSON.stringify(j)} wasm=${JSON.stringify({ ...w, name: wName })}`);
           bad = true;
           break;
@@ -273,7 +277,7 @@ function jsState(pos) {
     }
   }
   ok(plies > 100, `谱内游走 ${plies} 手 / 候选 ${candsChecked} 个(覆盖太薄)`);
-  console.log(`  游走 ${plies} 手,逐位置候选(line/weight/族名)全一致:${fail === 0 ? '✓' : '✗'}`);
+  console.log(`  游走 ${plies} 手,逐位置候选(line/流行度档/族名)全一致:${fail === 0 ? '✓' : '✗'}`);
 }
 
 /* ============================================================

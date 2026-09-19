@@ -355,11 +355,20 @@ fn runBook() void {
     const after = book.walk(&[_]i32{e2e4}).?;
     check(!after.empty(), "e2e4 之后谱内仍有候选", .{});
     check(book.walk(&[_]i32{(52 << 6) | 37}) == null, "谱外线判无谱", .{});
-    var picked = false;
-    for (1..8) |sd| {
-        if (book.pick(root, @intCast(sd)) != null) picked = true;
+    var pickOk = true;
+    for (1..16) |sd| {
+        const p = book.pick(root, @intCast(sd)) orelse {
+            pickOk = false;
+            break;
+        };
+        const line = (@as(u32, p.from) << 6) | p.to;
+        var inSet = false;
+        for (cands[0..nRoot]) |c| {
+            if (c.line == line) inSet = true;
+        }
+        if (!inSet) pickOk = false;
     }
-    check(picked, "加权抽取可用", .{});
+    check(pickOk, "档位加权抽取:多次落点都在候选集内", .{});
 }
 
 //  ---------- 基准 ----------

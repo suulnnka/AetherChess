@@ -13,14 +13,20 @@
  *   每族: u16 nameByteLen + UTF-8 族名
  *   u32  nodeCount            (不含哑根,核对用)
  *   u8   rootKids             (哑根的直接子节点数 —— 树无实体根,单独给)
- *   nodeCount × 前序节点,每个 6 字节:
+ *   nodeCount × 前序节点,3 字节起:
  *     u8 from, u8 to          (引擎格号,即线格式 (from<<6|to) 的两半)
- *     u16 weight              (子树谱线数,采样权重,原样取自 book.js)
- *     u8  fam                 (族下标,255 = 无名)
- *     u8  nKids
- *   子节点紧跟父节点头之后;兄弟之间靠"跳过子树"推进(见 book.zig)。
- *   key 挂在父节点的 c 映射上(book.js build() 的结构),子节点自身
- *   没有,必须随遍历传入。
+ *     u8 flags                bit7 hasFam · bit6-5 流行度等级(2 位)· bit0-4 nKids ≤ 31
+ *     [u8 fam]                hasFam 时才有:族下标(0..148)
+ *
+ * 流行度等级:把谱线数权重等比量化到 4 档,档位权 1 : n : n² : n³。
+ * n 在全谱 8652 个权重上拟合(按 w 加权的对数失真最小),n=10 时根分布
+ * 几乎无损(e4/d4 量化后 42.7% vs 原 42.0%),且失真代价距最优仅 6%
+ * —— 取 n=10,档位权就是 1/10/100/1000。>255 的权重全谱只有 12 个,
+ * 绝大多数(5845 个)权重本来就是 1。legacy_js 的 JS 版用精确权重,
+ * 两边开局分布近似相同而非逐位相同,这是有意的取舍(2 位换 17KB)。
+ *   子节点紧跟父节点头之后;兄弟之间靠"跳过子树"推进(节点变长,跳
+ *   子树要按 fam 是否存在步进,见 book.zig)。key 挂在父节点的 c 映射上
+ *   (book.js build() 的结构),子节点自身没有,必须随遍历传入。
  *
  * 用法:node tools/gen-book.mjs   (改 book.js 后重跑,再 build:wasm)
  * ============================================================ */
@@ -47,19 +53,23 @@ const chunks = [];
 const u16 = (v) => chunks.push(Buffer.from([v & 255, (v >> 8) & 255]));
 const u8 = (v) => chunks.push(Buffer.from([v]));
 
+const POP_N = 10;                       // 拟合结论,见头注释;book.zig 的 POP_LEVELS 必须同步
+const popClass = (w) => Math.max(0, Math.min(3, Math.round(Math.log(w) / Math.log(POP_N))));
 let nodeCount = 0;
+let famNodes = 0;
 const emit = (key, node) => {
   const kids = Object.entries(node.c || {});
-  if (kids.length > 255) {
-    console.error(`✗ 子节点数 ${kids.length} > 255(u8 nKids 放不下)`);
+  if (kids.length > 31) {
+    console.error(`✗ 子节点数 ${kids.length} > 31(flags 只留了 5 位)`);
     process.exit(1);
   }
   nodeCount++;
+  const hasFam = node.fam != null ? 1 : 0;
+  if (hasFam) famNodes++;
   u8(AL.indexOf(key[0]));
   u8(AL.indexOf(key[1]));
-  u16(node.w);
-  u8(node.fam != null ? node.fam : 255);
-  u8(kids.length);
+  u8((hasFam << 7) | (popClass(node.w) << 5) | kids.length);
+  if (hasFam) u8(node.fam);
   for (const [k, c] of kids) emit(k, c);
 };
 
@@ -83,5 +93,5 @@ bin.writeUInt32LE(nodeCount, countOffset);
 fs.writeFileSync(OUT, bin);
 
 const gz = zlib.gzipSync(bin, { level: 9 }).length;
-console.log(`✓ ${path.relative(ROOT_DIR, OUT)}:节点 ${nodeCount} / 根子 ${rootKids} / 族名 ${NFAM.length} 条`);
+console.log(`✓ ${path.relative(ROOT_DIR, OUT)}:节点 ${nodeCount} / 根子 ${rootKids} / 带族名节点 ${famNodes} / 族名 ${NFAM.length} 条(流行度档 1:${POP_N}:${POP_N ** 2}:${POP_N ** 3})`);
 console.log(`  raw ${bin.length} B · gzip ${gz} B(${(gz / 1024).toFixed(2)} KB)`);

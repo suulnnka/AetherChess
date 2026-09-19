@@ -209,10 +209,11 @@ export fn engineBind(from: i32, to: i32) i32 {
 
 // ---------- 开局库(blob 编译期嵌入,见 book.zig)----------
 var bookName: ?[]const u8 = null; // 最近一次 engineBookMove 的开局族名
-var candBuf = [_]i32{0} ** (256 * 3); // 候选缓冲:每项 (line, weight, fam) 三个 i32
+var candBuf = [_]i32{0} ** (256 * 3); // 候选缓冲:每项 (line, pop, fam) 三个 i32
 
-/// 开局库应手:按已装载的线序列走谱,按子树谱线数加权随机抽谱着并绑定到
-/// 合法着法(升后优先;谱着在当前局面不合法视为无谱,与 JS bookMove 同语义)。
+/// 开局库应手:按已装载的线序列走谱,按流行度档位(1:10:100:1000,
+/// 2 位量化,见 book.zig)加权随机抽一个孩子并绑定到合法着法(升后优先;
+/// 谱着在当前局面不合法视为无谱,与 JS bookMove 同语义)。
 /// 返回完整着法编码;0 = 谱外/谱尽,调用方回落搜索。
 /// 名字经 engineBookNamePtr/Len 读出(这步棋进入的开局族,无名则 len=0)。
 export fn engineBookMove(seed: i32) i32 {
@@ -248,8 +249,8 @@ export fn engineBookFamNameLen() i32 {
     return @intCast(nm.len);
 }
 
-/// 当前已装载序列的谱内候选(探针对拍用):每项 (line, weight, fam) 三个 i32,
-/// fam = -1 表示无名;返回候选数(0 = 谱外或谱尽)。
+/// 当前已装载序列的谱内候选(探针对拍用):每项 (line, pop, fam) 三个
+/// i32,fam = -1 表示无名;返回候选数(0 = 谱外或谱尽)。
 export fn engineBookCands() i32 {
     ensureInit();
     const kids = book.walk(inBuf[0..loadedCount]) orelse return 0;
@@ -257,7 +258,7 @@ export fn engineBookCands() i32 {
     const n = book.candidates(kids, &out);
     for (0..n) |i| {
         candBuf[i * 3] = @bitCast(out[i].line);
-        candBuf[i * 3 + 1] = out[i].w;
+        candBuf[i * 3 + 1] = out[i].pop;
         candBuf[i * 3 + 2] = if (out[i].fam == book.FAM_NONE) -1 else @intCast(out[i].fam);
     }
     return @intCast(n);
