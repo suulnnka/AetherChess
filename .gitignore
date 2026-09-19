@@ -5,3 +5,6 @@ bench/vendor/
 tuner/data/
 # 运行/对局日志一律不入库(tuner/results/ 本地留档);关键数据以 docs 文档为准
 *.log
+# zig 构建产物(zig build 自生成;入库的是 wasm/chess.wasm,由 tools/build-wasm.mjs 产出)
+.zig-cache/
+zig-out/
