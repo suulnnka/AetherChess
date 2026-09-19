@@ -13,6 +13,7 @@ const std = @import("std");
 const rules = @import("rules.zig");
 const eval = @import("eval.zig");
 const search = @import("search.zig");
+const book = @import("book.zig");
 
 var gio: std.Io = undefined;
 var failed: bool = false;
@@ -335,6 +336,32 @@ fn runEndgame() void {
     }
 }
 
+//  ---------- 开局谱库(二进制 blob)----------
+fn runBook() void {
+    say("\n== 开局谱库(二进制 blob,结构完整性)", .{});
+    check(book.verifyIntegrity(), "前序布局首尾相接恰好耗尽 blob", .{});
+    check(book.famCount() > 100 and book.nodeCount() > 5000, "体量:族 {d} / 节点 {d}", .{ book.famCount(), book.nodeCount() });
+    check(book.famName(255) == null and book.famName(0) != null and book.famName(book.famCount()) == null, "族名边界:255/越界为空,0 号有名字", .{});
+    const e2e4: i32 = (52 << 6) | 36;
+    const root = book.walk(&[_]i32{}).?;
+    check(root.count == book.rootKids() and root.count >= 15, "根候选 {d} 个", .{root.count});
+    var cands: [256]book.Cand = undefined;
+    const nRoot = book.candidates(root, &cands);
+    var hasE4 = false;
+    for (cands[0..nRoot]) |c| {
+        if (c.line == e2e4) hasE4 = true;
+    }
+    check(hasE4, "根候选含 e2e4", .{});
+    const after = book.walk(&[_]i32{e2e4}).?;
+    check(!after.empty(), "e2e4 之后谱内仍有候选", .{});
+    check(book.walk(&[_]i32{(52 << 6) | 37}) == null, "谱外线判无谱", .{});
+    var picked = false;
+    for (1..8) |sd| {
+        if (book.pick(root, @intCast(sd)) != null) picked = true;
+    }
+    check(picked, "加权抽取可用", .{});
+}
+
 //  ---------- 基准 ----------
 fn runBench(budget: u64) void {
     say("\n== 搜索基准({d} 节点预算/局面,6 个 perft 题面)", .{budget});
@@ -369,6 +396,7 @@ pub fn main(init: std.process.Init) !void {
     runEdges();
     runTactics();
     runEndgame();
+    runBook();
     runBench(300_000);
     if (failed) {
         say("\n✗ 自测未通过", .{});

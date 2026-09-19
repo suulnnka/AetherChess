@@ -10,7 +10,7 @@
 ## 两条分支:一个接口,两份实现
 
 - `main`(本分支)—— 在 JS 实现之上多一份 Zig/wasm 实现(`src/zig/*` →
-  `wasm/chess.wasm`,规则/评估/搜索全在 wasm),WebOS 国际象棋应用线上跑的是这套。
+  `wasm/chess.wasm`,规则/评估/搜索/开局谱库全在 wasm),WebOS 国际象棋应用线上跑的是这套。
   两套实现**同树共存**,跨语言对拍(`npm run probe:wasm`)不需要切分支:
   同节点预算下着法/评分/深度/节点数与 JS 版逐位一致,耗时约一半。
 - `legacy_js` —— JS 引擎的历史分支快照(`src/rules.js + eval.js + ai.js`),

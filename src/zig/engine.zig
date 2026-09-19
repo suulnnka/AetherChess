@@ -19,9 +19,11 @@ const std = @import("std");
 const rules = @import("rules.zig");
 const search = @import("search.zig");
 const eval = @import("eval.zig");
+const book = @import("book.zig");
 
 var pos: rules.Position = undefined;
 var inited = false;
+var loadedCount: usize = 0; // 最近一次 engineLoad 的步数(开局库按线序列走谱要用)
 
 fn ensureInit() void {
     if (!inited) {
@@ -46,6 +48,8 @@ export fn engineInit() i32 {
     ensureInit();
     pos = rules.newPos();
     search.clearTT();
+    loadedCount = 0;
+    bookName = null;
     return 0;
 }
 
@@ -54,6 +58,8 @@ export fn engineNew() i32 {
     ensureInit();
     pos = rules.newPos();
     search.clearTT();
+    loadedCount = 0;
+    bookName = null;
     return 0;
 }
 
@@ -70,7 +76,12 @@ export fn engineLoad(n: i32) i32 {
     pos = rules.newPos();
     const cnt: usize = @intCast(@max(n, 0));
     if (cnt > inBuf.len) return 0;
-    return if (rules.replayMoves(&pos, inBuf[0..cnt], &work)) 1 else 0;
+    if (!rules.replayMoves(&pos, inBuf[0..cnt], &work)) {
+        loadedCount = 0;
+        return 0;
+    }
+    loadedCount = cnt;
+    return 1;
 }
 
 /// 计算 state 回包所需的全部规则事实(棋盘/行棋方/合法着法/将军/终局),
@@ -176,10 +187,7 @@ export fn engineNodesHi() i32 {
     return @bitCast(@as(u32, @truncate(last.nodes >> 32)));
 }
 
-/// 在已装载局面上,把 (from,to) 绑定到合法着法的完整编码(升变取升后,
-/// 与 replayMoves 同一规则)。开局库的谱着绑定用;0 = 无匹配(谱外)。
-export fn engineBind(from: i32, to: i32) i32 {
-    ensureInit();
+fn bindLine(from: i32, to: i32) ?i32 {
     const n = rules.genMoves(&pos, &work);
     var i: usize = 0;
     while (i < n) : (i += 1) {
@@ -189,7 +197,73 @@ export fn engineBind(from: i32, to: i32) i32 {
         if (pr != 0 and pr != rules.QUEEN) continue;
         if (rules.isLegal(&pos, c)) return c;
     }
-    return 0;
+    return null;
+}
+
+/// 在已装载局面上,把 (from,to) 绑定到合法着法的完整编码(升变取升后,
+/// 与 replayMoves 同一规则)。0 = 无匹配。
+export fn engineBind(from: i32, to: i32) i32 {
+    ensureInit();
+    return if (bindLine(from, to)) |m| m else 0;
+}
+
+// ---------- 开局库(blob 编译期嵌入,见 book.zig)----------
+var bookName: ?[]const u8 = null; // 最近一次 engineBookMove 的开局族名
+var candBuf = [_]i32{0} ** (256 * 3); // 候选缓冲:每项 (line, weight, fam) 三个 i32
+
+/// 开局库应手:按已装载的线序列走谱,按子树谱线数加权随机抽谱着并绑定到
+/// 合法着法(升后优先;谱着在当前局面不合法视为无谱,与 JS bookMove 同语义)。
+/// 返回完整着法编码;0 = 谱外/谱尽,调用方回落搜索。
+/// 名字经 engineBookNamePtr/Len 读出(这步棋进入的开局族,无名则 len=0)。
+export fn engineBookMove(seed: i32) i32 {
+    ensureInit();
+    bookName = null;
+    const kids = book.walk(inBuf[0..loadedCount]) orelse return 0;
+    const p = book.pick(kids, @bitCast(seed)) orelse return 0;
+    const mv = bindLine(p.from, p.to) orelse return 0;
+    bookName = if (p.fam == book.FAM_NONE) null else book.famName(p.fam);
+    return mv;
+}
+export fn engineBookNamePtr() i32 {
+    const nm = bookName orelse return 0;
+    return @intCast(@intFromPtr(nm.ptr));
+}
+export fn engineBookNameLen() i32 {
+    const nm = bookName orelse return 0;
+    return @intCast(nm.len);
+}
+
+/// 族下标 → 族名(探针对拍用):ptr 为 0 = 无名/越界
+pub var famNameCache: ?[]const u8 = null;
+export fn engineBookFamName(fam: i32) i32 {
+    const nm = book.famName(@intCast(@max(fam, 0))) orelse {
+        famNameCache = null;
+        return 0;
+    };
+    famNameCache = nm;
+    return @intCast(@intFromPtr(nm.ptr));
+}
+export fn engineBookFamNameLen() i32 {
+    const nm = famNameCache orelse return 0;
+    return @intCast(nm.len);
+}
+
+/// 当前已装载序列的谱内候选(探针对拍用):每项 (line, weight, fam) 三个 i32,
+/// fam = -1 表示无名;返回候选数(0 = 谱外或谱尽)。
+export fn engineBookCands() i32 {
+    ensureInit();
+    const kids = book.walk(inBuf[0..loadedCount]) orelse return 0;
+    var out: [256]book.Cand = undefined;
+    const n = book.candidates(kids, &out);
+    for (0..n) |i| {
+        candBuf[i * 3] = @bitCast(out[i].line);
+        candBuf[i * 3 + 1] = out[i].w;
+        candBuf[i * 3 + 2] = if (out[i].fam == book.FAM_NONE) -1 else @intCast(out[i].fam);
+    }
+    return @intCast(n);
+}
+export fn engineBookCandPtr() i32 {
+    return @intCast(@intFromPtr(&candBuf));
 }
 
 //  ---------- perft(探针用:与 JS test/engine-test.mjs 同一标准值对拍)----------

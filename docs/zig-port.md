@@ -41,6 +41,8 @@ JS 的迭代早停「节点过半**且**时间过半」是省墙钟的启发,在
 | `engineEvalCp` | 已装载局面的静态评估(行棋方视角,对拍用) |
 | `engineThink(depth, nodes, jitter, seed)` | 搜索;`engineScore/engineDepth/engineNodesLo/Hi` 读细节;jitter 档的随机源由 worker 播种 |
 | `engineBind(from, to)` | 谱着绑定:开局库的 from/to → 合法着法完整编码(升后优先) |
+| `engineBookMove(seed)` + `engineBookNamePtr/Len` | 开局库应手:按已装载线序列走谱,按子树谱线数加权随机抽谱着并绑定;0 = 谱外回落搜索;族名(UTF-8)经指针读出 |
+| `engineBookCands` + `engineBookCandPtr/FamName` | 当前序列的谱内候选(line/weight/fam)与族名查询(探针对拍用) |
 | `enginePerft(depth)` + `enginePerftHi` | perft(探针对拍) |
 
 ## 目录与工具
@@ -49,14 +51,17 @@ JS 的迭代早停「节点过半**且**时间过半」是省墙钟的启发,在
 src/zig/rules.zig     棋规(mailbox / 走法打包 / make-unmake / Zobrist / replay / FEN 装载)
 src/zig/eval.zig      评估(evalTerms 全量路径;JS 的增量评估路径从未在对弈启用,不移植)
 src/zig/search.zig    搜索(PVS/TT/qsearch/SEE/LMR/空着/RFP/aspiration/jitter)
+src/zig/book.zig      开局谱库:二进制 blob 零拷贝游走(走谱/加权抽取/族名)
+src/zig/book.bin      谱库 blob(生成物:tools/gen-book.mjs 从 book.js 导出,布局见该脚本头)
 src/zig/engine.zig    wasm 导出层
-src/zig/selftest.zig  原生自测(perft/不变量/边角/战术/残局/NPS 基准)
+src/zig/selftest.zig  原生自测(perft/不变量/边角/战术/残局/谱库结构/NPS 基准)
 src/zig/params.zig    491 评估参数(生成物:tools/gen-params.mjs 从 eval.js 导出)
 build.zig             selftest(native)/ wasm / 单元测试 三个 step
 tools/build-wasm.mjs  zig build → wasm/chess.wasm(入库)→ 体积报告 → 跑探针
-tools/probe-wasm.mjs  跨语言对拍(三道关,见下)
+tools/probe-wasm.mjs  跨语言对拍(四道关,见下)
 tools/worker-test.mjs worker 胶水层契约测试(levels/state/think/开局库)
 tools/gen-params.mjs  参数导出(重调参后重跑)
+tools/gen-book.mjs    谱库 blob 导出(改 book.js 后重跑)
 ```
 
 ## 验证(四道关)
@@ -68,6 +73,8 @@ tools/gen-params.mjs  参数导出(重调参后重跑)
 2. **跨语言对拍** `node tools/probe-wasm.mjs`:
    - perft / state:标准值 + 与 JS 的合法着法表逐项一致;
    - **评估逐位对拍**:随机游走 600 局面,`evaluate(pos)` 与 `engineEvalCp` 完全相等;
+   - **开局谱库对拍**:谱内随机游走,每个位置的候选集(line/weight/族名)与
+     book.js 的 `bookCandidates` 逐项一致 —— blob 序列化/解析零漂移;
    - **搜索逐位对拍**:自对弈逐手比较 `searchBest`(JS,ms 传超大)与 `engineThink`
      的 move/score/depth/nodes —— 全部相等。搜索按对弈顺序进行,两侧置换表同步演化,
      任何一处实现漂移都会当场炸出。
@@ -92,6 +99,7 @@ tools/gen-params.mjs  参数导出(重调参后重跑)
 
 ```bash
 node tools/gen-params.mjs     # eval.js 参数变了:重新导出 params.zig
+node tools/gen-book.mjs       # book.js 谱库变了:重新导出 book.bin
 node tools/build-wasm.mjs     # 重建 + 自动跑探针(忘了重建或改漂了会在这里被拦住)
-git add wasm/chess.wasm src/zig/params.zig
+git add wasm/chess.wasm src/zig/params.zig src/zig/book.bin
 ```

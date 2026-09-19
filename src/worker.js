@@ -24,12 +24,12 @@
  * moves 是 (from<<6|to) 的走法序列 —— 传序列而不是传棋盘:
  * 结构化克隆最省,编码只有一套,不存在两条解析路径。
  *
- * 分工:**规则/评估/搜索全在 wasm 里**(engineLoad 重演 → engineState 查询
- * → engineThink 搜索;与黑白棋 wasm 通道当时的"JS 过渡规则层"不同,zig
- * 工具链现成,规则一步到位下沉,JS 侧零规则代码、不可能与引擎吵架)。
- * 留在 JS 的是两块纯数据:开局库 book.js(含 3800 条谱线与开局名,查询是
- * 纯字符串树遍历)与难度表 levels.js;谱着命中后经 engineBind 绑定回
- * 合法着法编码。
+ * 分工:**规则/评估/搜索/开局谱库全在 wasm 里**(engineLoad 重演 →
+ * engineState 查询 → engineThink 搜索 → engineBookMove 应谱;与黑白棋
+ * wasm 通道当时的"JS 过渡规则层"不同,zig 工具链现成,一步到位下沉,
+ * JS 侧零引擎代码、不可能与引擎吵架)。谱库是编译期嵌入的二进制 blob
+ * (含 3800 条谱线与开局族名,tools/gen-book.mjs 从 book.js 生成);留在
+ * JS 的只剩难度表 levels.js 一块纯数据,chunk 从 ~21KB 缩到 ~2KB。
  *
  * wasm 没有墙钟,难度档的 ms 字段在 think 路径不生效 —— 节点预算是主约束
  * (levels.js 头注释的口径),wasm 下每档的耗时只会更短不会更长。
@@ -37,7 +37,6 @@
  * 搜索是同步的,Worker 收到新消息只会排队;UI 侧用请求序号丢弃过期结果,
  * 需要真正中断时直接 terminate 再造一个(见 webos 应用的 abortEngine)。
  * ============================================================ */
-import { bookResponse } from './book.js';
 import { LEVELS, DEFAULT_LEVEL } from './levels.js';
 
 /* ENGINE_TAG 让下游 webos 的体积闸门(check-size.mjs)能在 dist 里认出这个
@@ -52,10 +51,6 @@ const WASM_URL = new URL('../wasm/chess.wasm', import.meta.url);
 
 /* wasm 状态码 → UI/契约字符串(result 与 JS 版 describeState 同名同义) */
 const RESULT_NAME = ['', 'mate', 'stale', 'material', 'threefold'];
-
-const FILES = 'abcdefgh';
-/** 线格号 → 坐标串('e2');与旧 worker 的 NAME() 同一编码 */
-const NAME = (sq) => FILES[sq & 7] + (8 - (sq >> 3));
 
 let booting = null;
 
@@ -139,18 +134,18 @@ function handle(d) {
       self.postMessage({ id: d.id, error: 'illegal-sequence' });
       return;
     }
-    /* 开局库优先:命中谱着直接回着,不再搜索。谱树查询是纯 JS(字符串树),
-     * 谱着经 engineBind 绑定到当前局面的合法着法(升变取升后),书着不合法
-     * 视为无谱 —— 与 JS 版 bookMove 的绑定语义一致。 */
-    const hit = bookResponse(d.moves.map((p) => NAME(p >> 6) + NAME(p & 63)));
-    if (hit) {
-      const from = FILES.indexOf(hit.move[0]) + (8 - +hit.move[1]) * 8;
-      const to = FILES.indexOf(hit.move[2]) + (8 - +hit.move[3]) * 8;
-      const mv = X.engineBind(from, to);
-      if (mv) {
-        self.postMessage({ id: d.id, move: mv, book: true, name: hit.name, depth: 0, nodes: 0, ms: Date.now() - t0, score: 0 });
-        return;
-      }
+    /* 开局库优先:命中谱着直接回着,不再搜索。谱库是**编译期嵌进 wasm 的
+     * 二进制 blob**(tools/gen-book.mjs 从 book.js 生成,见 src/zig/book.zig),
+     * 走谱/加权抽取/绑定(升后优先)/开局族名全在引擎侧;谱着在当前局面
+     * 不合法时引擎回 0,回落搜索 —— 与 JS 版 bookMove 的语义一致。 */
+    const bm = X.engineBookMove((Math.random() * 4294967296) >>> 0);
+    if (bm) {
+      const len = X.engineBookNameLen();
+      const name = len > 0
+        ? new TextDecoder().decode(new Uint8Array(X.memory.buffer, X.engineBookNamePtr(), len))
+        : null;
+      self.postMessage({ id: d.id, move: bm, book: true, name, depth: 0, nodes: 0, ms: Date.now() - t0, score: 0 });
+      return;
     }
     const lv = LEVELS[d.level] ?? LEVELS[DEFAULT_LEVEL] ?? LEVELS[0];
     /* 难度的 nodes/depth/jitter 原样传入;ms 兜底在 wasm 里不存在(wasm 没有

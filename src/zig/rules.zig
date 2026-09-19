@@ -193,9 +193,9 @@ fn buildRay(targets: anytype, segs: *[320]i32, hit: *const [8]i8) void {
 // ============================================================
 /// JS 侧 mulberry32 的位级等价实现(u32 环绕运算;每步与 Math.imul/|0 的
 /// 补码行为逐位相同),种子相同 ⇒ 生成的 Zobrist 表与 rules.js 完全一致。
-const Mulberry32 = struct {
+pub const Mulberry32 = struct {
     s: u32,
-    fn next(m: *Mulberry32) u32 {
+    pub fn next(m: *Mulberry32) u32 {
         m.s +%= 0x6D2B79F5;
         var t: u32 = m.s ^ (m.s >> 15);
         t *%= 1 | m.s;

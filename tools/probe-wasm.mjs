@@ -25,6 +25,7 @@ import {
   isThreefold, insufficientMaterial,
 } from '../src/rules.js';
 import { searchBest, evaluate } from '../src/ai.js';
+import { bookCandidates } from '../src/book.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const argv = process.argv.slice(2);
@@ -196,7 +197,87 @@ function jsState(pos) {
 }
 
 /* ============================================================
- * 4. 搜索逐位对拍(自对弈,同节点预算;TT 两侧同步演化)
+ * 4. 开局谱库对拍(wasm 二进制 blob vs book.js 参照实现)
+ * ============================================================ */
+{
+  console.log('\n== 开局谱库对拍(随机谱内游走 × 12,候选集逐位一致)');
+  const NAMEQ = (sq) => 'abcdefgh'[sq & 7] + (8 - (sq >> 3));
+  let seed = 0xb00c5eed;
+  const rnd = () => { seed = (Math.imul(seed, 1103515245) + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+  let plies = 0, candsChecked = 0;
+
+  const wasmCands = (seq) => {
+    if (!loadSeq(seq)) throw new Error('谱内游走装载失败');
+    const n = X.engineBookCands();
+    if (n === 0) return [];
+    const raw = new Int32Array(X.memory.buffer, X.engineBookCandPtr(), n * 3);
+    return Array.from(raw).reduce((acc, _, i, all) => {
+      if (i % 3 === 0) acc.push({ line: all[i], w: all[i + 1], fam: all[i + 2] });
+      return acc;
+    }, []);
+  };
+  const wasmFamName = (fam) => {
+    const ptr = X.engineBookFamName(fam);
+    if (!ptr) return null;
+    const len = X.engineBookFamNameLen();
+    return new TextDecoder().decode(new Uint8Array(X.memory.buffer, ptr, len));
+  };
+
+  for (let g = 0; g < 12; g++) {
+    const pos = newPos();
+    const seq = [];
+    for (let p = 0; p < 30; p++) {
+      const js = bookCandidates(seq.map((l) => NAMEQ(l >> 6) + NAMEQ(l & 63)));
+      const jsList = (js || []).map((c) => {
+        const from = 'abcdefgh'.indexOf(c.move[0]) + (8 - +c.move[1]) * 8;
+        const to = 'abcdefgh'.indexOf(c.move[2]) + (8 - +c.move[3]) * 8;
+        return { line: (from << 6) | to, w: c.w, name: c.name };
+      });
+      const wasmList = wasmCands(seq);
+      if (jsList.length !== wasmList.length) {
+        ok(false, `谱库游走 ${g} 第 ${p} 手候选数不一致 js=${jsList.length} wasm=${wasmList.length}`);
+        break;
+      }
+      let bad = false;
+      for (let i = 0; i < jsList.length; i++) {
+        const j = jsList[i], w = wasmList[i];
+        const wName = w.fam < 0 ? null : wasmFamName(w.fam);
+        if (j.line !== w.line || j.w !== w.w || (j.name || null) !== wName) {
+          ok(false, `谱库游走 ${g} 第 ${p} 手第 ${i} 个候选不一致:js=${JSON.stringify(j)} wasm=${JSON.stringify({ ...w, name: wName })}`);
+          bad = true;
+          break;
+        }
+      }
+      if (bad) break;
+      candsChecked += jsList.length;
+      if (!jsList.length) break;   // 谱尽
+      // 按权重随机走一步(带种子,可复现),JS 侧用规则推进一步
+      let sum = 0;
+      for (const c of jsList) sum += c.w;
+      let t = rnd() * sum;
+      let pick = jsList[0];
+      for (const c of jsList) { t -= c.w; if (t <= 0) { pick = c; break; } }
+      const n2 = genLegal(pos, BUF);
+      let mv = 0;
+      for (let i = 0; i < n2; i++) {
+        const c = BUF[i];
+        if (((mFrom(c) << 6) | mTo(c)) !== pick.line) continue;
+        const pr = mPromo(c);
+        if (pr && pr !== QUEEN) continue;
+        mv = c; break;
+      }
+      if (!mv) { ok(false, `谱库游走 ${g} 第 ${p} 手:谱着 ${pick.line} 不合法(谱数据坏?)`); break; }
+      make(pos, mv);
+      seq.push(pick.line);
+      plies++;
+    }
+  }
+  ok(plies > 100, `谱内游走 ${plies} 手 / 候选 ${candsChecked} 个(覆盖太薄)`);
+  console.log(`  游走 ${plies} 手,逐位置候选(line/weight/族名)全一致:${fail === 0 ? '✓' : '✗'}`);
+}
+
+/* ============================================================
+ * 5. 搜索逐位对拍(自对弈,同节点预算;TT 两侧同步演化)
  * ============================================================ */
 {
   console.log(`\n== 搜索逐位对拍(自对弈 ${GAMES} 局 × ≤${MAXPLY} 手,${NODES} 节点/手)`);
