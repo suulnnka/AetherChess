@@ -2,7 +2,7 @@
   "name": "aether-chess",
   "version": "1.0.0",
   "type": "module",
-  "description": "国际象棋引擎:JS 参照实现(零依赖、无 DOM,Node 与 Worker 通用)+ Zig/wasm 移植通道(zig 分支);PVS/TT/静态搜索 + Texel 调参的 491 参数 HCE 评估",
+  "description": "国际象棋引擎:JS 参照实现(零依赖、无 DOM,Node 与 Worker 通用)+ Zig/wasm 通道(main 分支,规则/评估/搜索全在 wasm);PVS/TT/静态搜索 + Texel 调参的 491 参数 HCE 评估",
   "main": "src/ai.js",
   "exports": {
     ".": "./src/ai.js",

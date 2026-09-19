@@ -1,7 +1,7 @@
 /* ============================================================
  * AI Worker:引擎的门面(UI 不 import 引擎源码,一切经消息)—— **zig/wasm 通道**
  *
- * 消息契约与 main 分支的 src/worker.js(JS 参照实现)**完全同一份**,UI、
+ * 消息契约与 legacy_js 分支的 src/worker.js(JS 参照实现)**完全同一份**,UI、
  * 探针、对比脚本换实现都不用改;那边背后是 src/rules.js + src/ai.js,
  * 这边背后是 wasm/chess.wasm(zig 移植,见 src/zig/)。跨实现逐位一致性
  * 由 tools/probe-wasm.mjs 守住(评估/搜索/规则三重对拍)。

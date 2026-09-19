@@ -1,8 +1,9 @@
-# Zig / wasm 移植(zig 分支)
+# Zig / wasm 移植(main 分支)
 
-> 状态:**完成,验证通过**。`zig` 分支把引擎(rules / eval / search)逐句移植到 Zig,
-> 编译为 `wasm/chess.wasm`,worker 消息契约与 main(JS 参照实现)完全同一份。
-> main 分支不受影响 —— 两边并排存在,合并进 main 之前 webos 主仓不切指针。
+> 状态:**完成,验证通过**(分支命名对齐 AetherOthello:main = 叠加了 Zig 实现的
+> 线上通道,legacy_js = JS 引擎的历史快照)。main 把引擎(rules / eval / search)
+> 逐句移植到 Zig 并编译为 `wasm/chess.wasm`,worker 消息契约与 `legacy_js` 的
+> `src/worker.js`(JS 参照实现)完全同一份;webos 主仓切子模块指针即启用。
 
 ## 为什么是"逐句移植"而不是重写
 
@@ -85,7 +86,7 @@ tools/gen-params.mjs  参数导出(重调参后重跑)
   不计入下载);webos 侧合并主干时把 JS 引擎 chunk(8.4 KB)换成 worker 胶水 + 本产物。
 - 同节点预算下着法与 JS 完全一致,耗时约一半(浏览器 wasm ≈ 60 万 NPS vs JS ≈ 27.5 万);
   等价于**同强度、等待减半**,或在相同等待下把 nodes 预算翻档提强度(后者属
-  levels.js 重标定,本次未动 —— 保持与 main 分支同难度参数,便于对照)。
+  levels.js 重标定,本次未动 —— 保持与 legacy_js 同难度参数,同预算同着法,便于对照)。
 
 ## 重调参 / 改引擎后怎么更新 wasm
 
