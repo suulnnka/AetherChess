@@ -7,6 +7,11 @@
 **在线体验:** 打开 <https://suulnnka.github.io/AetherWebOS/> 启动「3D 国际象棋」应用 —— 那里面跑的就是本引擎
 (Worker 后台思考,四档强度,状态栏实时显示深度/节点数/评分)。
 
+> **zig 分支**:main 是 JS 参照实现;`zig` 分支把引擎逐句移植到 Zig 并编译为
+> `wasm/chess.wasm`(规则/评估/搜索全在 wasm,worker 消息契约不变),与 JS 版
+> **逐位对拍**通过 —— 同节点预算下着法/评分/深度/节点数完全一致,耗时约一半。
+> 见 `docs/zig-port.md`。
+
 ## 引擎构成
 
 | 文件 | 行数 | 职责 |
@@ -43,6 +48,12 @@ npm test                      # perft(6 局面精确匹配)+ 旧实现对拍 + m
 node test/engine-test.mjs --quick   # 快速档
 node test/engine-test.mjs 2         # 只跑第 2 节(--list 查看全部)
 
+npm run selftest              # zig 分支:原生自测(perft/不变量/战术/残局/NPS 基准)
+npm run test:zig              # zig 分支:单元测试(Zobrist/评估与 JS 钉位一致)
+npm run build:wasm            # zig 分支:重建 wasm/chess.wasm 并自动跑跨语言对拍
+npm run probe:wasm            # zig 分支:单独跑对拍(评估/搜索逐位一致)
+npm run test:worker           # zig 分支:worker 胶水层契约测试
+
 node bench/uci-bench.mjs --depth 5 --games 8        # vs 限深 Stockfish(JS 构建,自动 npm pack 拉取)
 node bench/wasm-bench.mjs --level hard --games 8    # vs chessy 的 Rust/WASM 引擎
 node bench/uci-match.mjs --a A.mjs --b B.mjs        # 任意两个 UCI 引擎互打
@@ -64,6 +75,7 @@ node bench/uci-match.mjs --a A.mjs --b B.mjs        # 任意两个 UCI 引擎互
 | `docs/chess-eval-upgrade.md` | 评估升级决策:三方(手写/lichess 拟合/参数集)对照与许可证核查 |
 | `docs/chess-eval-tuning-plan.md` | 调参决策:参数集设计、采样器、闸门、验收标准 |
 | `docs/chess-eval-training-report.md` | 训练报告:拟合结果、A/B 对弈数据、落地过程 |
+| `docs/zig-port.md` | zig 分支:Zig/wasm 移植的纪律、ABI、验证与工具链 |
 
 ## License
 
