@@ -35,6 +35,7 @@ import path from 'node:path';
 import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import { ROOT } from '../src/book.js';
+import { prunedRoot, PRUNE_W, PRUNE_DEPTH } from './book-prune.mjs';
 
 const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = path.join(ROOT_DIR, 'src', 'zig', 'book.bin');
@@ -43,6 +44,11 @@ const OUT = path.join(ROOT_DIR, 'src', 'zig', 'book.bin');
 const src = fs.readFileSync(path.join(ROOT_DIR, 'src', 'book.js'), 'utf8');
 const NFAM = JSON.parse(src.match(/const NFAM = (\[.*?\]);/s)[1]);
 const AL = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_$';
+
+/* 剪枝:低流行(w≤PRUNE_W)且够长(≥PRUNE_DEPTH 手)的冷门理论尾巴整段收回,
+ * 主流线不动;被截断的线只是更早出谱回落搜索。规则与阈值见 book-prune.mjs。 */
+const pruned = prunedRoot();
+const ROOT_ = pruned.tree;
 
 if (NFAM.length > 254) {
   console.error(`✗ 族名 ${NFAM.length} 条 > 254(u8 fam 用 255 当"无名"标记)`);
@@ -84,14 +90,14 @@ for (const nm of NFAM) {
 let countOffset = 0;
 for (const c of chunks) countOffset += c.length;
 chunks.push(Buffer.alloc(4));
-const rootKids = Object.keys(ROOT.c).length;
+const rootKids = Object.keys(ROOT_.c).length;
 u8(rootKids);
-for (const [k, c] of Object.entries(ROOT.c)) emit(k, c);
+for (const [k, c] of Object.entries(ROOT_.c)) emit(k, c);
 
 const bin = Buffer.concat(chunks);
 bin.writeUInt32LE(nodeCount, countOffset);
 fs.writeFileSync(OUT, bin);
 
 const gz = zlib.gzipSync(bin, { level: 9 }).length;
-console.log(`✓ ${path.relative(ROOT_DIR, OUT)}:节点 ${nodeCount} / 根子 ${rootKids} / 带族名节点 ${famNodes} / 族名 ${NFAM.length} 条(流行度档 1:${POP_N}:${POP_N ** 2}:${POP_N ** 3})`);
+console.log(`✓ ${path.relative(ROOT_DIR, OUT)}:节点 ${nodeCount}(剪枝 −${pruned.removed},w≤${PRUNE_W} 且 ≥${PRUNE_DEPTH} 手)/ 根子 ${rootKids} / 带族名节点 ${famNodes} / 族名 ${NFAM.length} 条(流行度档 1:${POP_N}:${POP_N ** 2}:${POP_N ** 3})`);
 console.log(`  raw ${bin.length} B · gzip ${gz} B(${(gz / 1024).toFixed(2)} KB)`);

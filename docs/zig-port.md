@@ -52,7 +52,7 @@ src/zig/rules.zig     棋规(mailbox / 走法打包 / make-unmake / Zobrist / re
 src/zig/eval.zig      评估(evalTerms 全量路径;JS 的增量评估路径从未在对弈启用,不移植)
 src/zig/search.zig    搜索(PVS/TT/qsearch/SEE/LMR/空着/RFP/aspiration/jitter)
 src/zig/book.zig      开局谱库:二进制 blob 零拷贝游走(走谱/档位加权抽取/族名)
-src/zig/book.bin      谱库 blob(生成物:tools/gen-book.mjs 从 book.js 导出;节点 3 字节起 —— from/to/flags(bit7 族名 · bit6-5 流行度档 · bit0-4 孩子数)+ 可选族名字节)
+src/zig/book.bin      谱库 blob(生成物:tools/gen-book.mjs 从 book.js 导出;节点 3 字节起 —— from/to/flags(bit7 族名 · bit6-5 流行度档 · bit0-4 孩子数)+ 可选族名字节。生成前经 book-prune.mjs 剪枝:摘除「w≤1 且 ≥10 手」的冷门理论尾巴,8652→5794 节点,被截断的线只是更早出谱回落搜索)
 src/zig/engine.zig    wasm 导出层
 src/zig/selftest.zig  原生自测(perft/不变量/边角/战术/残局/谱库结构/NPS 基准)
 src/zig/params.zig    491 评估参数(生成物:tools/gen-params.mjs 从 eval.js 导出)

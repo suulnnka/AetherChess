@@ -25,7 +25,7 @@ import {
   isThreefold, insufficientMaterial,
 } from '../src/rules.js';
 import { searchBest, evaluate } from '../src/ai.js';
-import { bookCandidates } from '../src/book.js';
+import { prunedRoot, candidatesOn } from '../tools/book-prune.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const argv = process.argv.slice(2);
@@ -202,6 +202,7 @@ function jsState(pos) {
 {
   console.log('\n== 开局谱库对拍(随机谱内游走 × 12,候选集逐位一致)');
   const NAMEQ = (sq) => 'abcdefgh'[sq & 7] + (8 - (sq >> 3));
+  const BOOK = prunedRoot().tree;   // 期望侧与生成器同源剪枝(book-prune.mjs 单一事实源)
   let seed = 0xb00c5eed;
   const rnd = () => { seed = (Math.imul(seed, 1103515245) + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
   let plies = 0, candsChecked = 0;
@@ -227,7 +228,7 @@ function jsState(pos) {
     const pos = newPos();
     const seq = [];
     for (let p = 0; p < 30; p++) {
-      const js = bookCandidates(seq.map((l) => NAMEQ(l >> 6) + NAMEQ(l & 63)));
+      const js = candidatesOn(BOOK, seq.map((l) => NAMEQ(l >> 6) + NAMEQ(l & 63)));
       /* 权重比的是**量化档位**:wasm 不存精确谱线数,存 2 位流行度
        * (1:10:100:1000,n=10 全谱拟合,见 tools/gen-book.mjs);JS 侧按
        * 同一公式把 w 换算成期望档位再比 —— 精确权重则有意不比 */
