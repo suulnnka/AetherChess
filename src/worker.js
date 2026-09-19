@@ -138,7 +138,10 @@ function handle(d) {
      * 二进制 blob**(tools/gen-book.mjs 从 book.js 生成,见 src/zig/book.zig),
      * 走谱/加权抽取/绑定(升后优先)/开局族名全在引擎侧;谱着在当前局面
      * 不合法时引擎回 0,回落搜索 —— 与 JS 版 bookMove 的语义一致。 */
-    const bm = X.engineBookMove((Math.random() * 4294967296) >>> 0);
+    /* 开局族名双语:blob 每族存英/中两条,lang 选显示语言(0=英文 1=中文)。
+     * 应用侧可在 think 请求里带 lang: 'en'|'zh',缺省中文(UI 中文为主)。 */
+    const lang = d.lang === 'en' ? 0 : 1;
+    const bm = X.engineBookMove((Math.random() * 4294967296) >>> 0, lang);
     if (bm) {
       const len = X.engineBookNameLen();
       const name = len > 0

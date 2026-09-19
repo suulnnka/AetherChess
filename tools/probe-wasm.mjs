@@ -26,6 +26,7 @@ import {
 } from '../src/rules.js';
 import { searchBest, evaluate } from '../src/ai.js';
 import { prunedRoot, candidatesOn } from '../tools/book-prune.mjs';
+import { BOOK_ZH } from './book-zh.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const argv = process.argv.slice(2);
@@ -217,8 +218,8 @@ function jsState(pos) {
       return acc;
     }, []);
   };
-  const wasmFamName = (fam) => {
-    const ptr = X.engineBookFamName(fam);
+  const wasmFamName = (fam, lang) => {
+    const ptr = X.engineBookFamName(fam, lang);
     if (!ptr) return null;
     const len = X.engineBookFamNameLen();
     return new TextDecoder().decode(new Uint8Array(X.memory.buffer, ptr, len));
@@ -246,8 +247,10 @@ function jsState(pos) {
       let bad = false;
       for (let i = 0; i < jsList.length; i++) {
         const j = jsList[i], w = wasmList[i];
-        const wName = w.fam < 0 ? null : wasmFamName(w.fam);
-        if (j.line !== w.line || j.pop !== w.pop || (j.name || null) !== wName) {
+        const wName = w.fam < 0 ? null : wasmFamName(w.fam, 0);   // 英文名对 book.js 原名
+        const wZh = w.fam < 0 ? null : wasmFamName(w.fam, 1);      // 中文名对译名表
+        if (j.line !== w.line || j.pop !== w.pop || (j.name || null) !== wName
+          || (w.fam >= 0 && wZh !== BOOK_ZH[w.fam])) {
           ok(false, `谱库游走 ${g} 第 ${p} 手第 ${i} 个候选不一致:js=${JSON.stringify(j)} wasm=${JSON.stringify({ ...w, name: wName })}`);
           bad = true;
           break;

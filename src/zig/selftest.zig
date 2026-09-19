@@ -341,7 +341,8 @@ fn runBook() void {
     say("\n== 开局谱库(二进制 blob,结构完整性)", .{});
     check(book.verifyIntegrity(), "前序布局首尾相接恰好耗尽 blob", .{});
     check(book.famCount() > 100 and book.nodeCount() > 5000, "体量:族 {d} / 节点 {d}", .{ book.famCount(), book.nodeCount() });
-    check(book.famName(255) == null and book.famName(0) != null and book.famName(book.famCount()) == null, "族名边界:255/越界为空,0 号有名字", .{});
+    check(book.famName(255, .en) == null and book.famName(0, .zh) != null and book.famName(book.famCount(), .en) == null, "族名边界:255/越界为空,0 号有名字", .{});
+    check(book.famName(0, .en) != null and book.famName(0, .zh) != null and !std.mem.eql(u8, book.famName(0, .en).?, book.famName(0, .zh).?), "族名双语:英/中两条都非空且不同", .{});
     const e2e4: i32 = (52 << 6) | 36;
     const root = book.walk(&[_]i32{}).?;
     check(root.count == book.rootKids() and root.count >= 15, "根候选 {d} 个", .{root.count});

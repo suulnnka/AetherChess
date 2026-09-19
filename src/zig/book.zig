@@ -22,8 +22,13 @@ pub const blob = @embedFile("book.bin");
 
 pub const FAM_NONE: u16 = 0xFFFF;
 
-var famOff: [255]u32 = undefined; // 每族名的数据字节偏移(名字区解析一次)
-var famLen: [255]u16 = undefined;
+var famEnOff: [255]u32 = undefined; // 每族英文名的字节偏移(名字区解析一次)
+var famEnLen: [255]u16 = undefined;
+var famZhOff: [255]u32 = undefined; // 每族中文名的字节偏移
+var famZhLen: [255]u16 = undefined;
+
+/// 族名语言(blob 每族存英/中两条 UTF-8)
+pub const Lang = enum(u8) { en = 0, zh = 1 };
 var nodesBase: usize = 0;
 var rootKidsV: u8 = 0;
 var famCountV: u16 = 0;
@@ -41,10 +46,14 @@ fn init() void {
     var off: usize = 2;
     const n = rd16(0);
     for (0..n) |i| {
-        const len = rd16(off);
-        famOff[i] = @intCast(off + 2);
-        famLen[i] = len;
-        off += 2 + len;
+        const enLen = rd16(off);
+        famEnOff[i] = @intCast(off + 2);
+        famEnLen[i] = enLen;
+        off += 2 + enLen;
+        const zhLen = rd16(off);
+        famZhOff[i] = @intCast(off + 2);
+        famZhLen[i] = zhLen;
+        off += 2 + zhLen;
     }
     // off 此刻指向 nodeCount(u32),其后是 rootKids,再后是首个节点
     nodesBase = off + 5;
@@ -66,12 +75,15 @@ pub fn rootKids() u8 {
     return rootKidsV;
 }
 
-/// 族下标 → 族名(fam ≥ famCount 或 255 → null,对应 JS 的"无名谱着")
-pub fn famName(fam: u16) ?[]const u8 {
+/// 族下标 → 指定语言的族名(fam ≥ famCount 或 255 → null,对应"无名谱着")
+pub fn famName(fam: u16, lang: Lang) ?[]const u8 {
     init();
     if (fam == 255 or fam >= famCountV) return null;
     const i: usize = fam;
-    return blob[famOff[i]..][0..famLen[i]];
+    return switch (lang) {
+        .en => blob[famEnOff[i]..][0..famEnLen[i]],
+        .zh => blob[famZhOff[i]..][0..famZhLen[i]],
+    };
 }
 
 pub const Node = struct {

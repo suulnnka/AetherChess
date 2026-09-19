@@ -10,7 +10,7 @@
  *
  * 布局(一律小端):
  *   u16  famCount
- *   每族: u16 nameByteLen + UTF-8 族名
+ *   每族: u16 enLen + UTF-8 英文名 + u16 zhLen + UTF-8 中文名(BOOK_ZH 译名表)
  *   u32  nodeCount            (不含哑根,核对用)
  *   u8   rootKids             (哑根的直接子节点数 —— 树无实体根,单独给)
  *   nodeCount × 前序节点,3 字节起:
@@ -36,6 +36,7 @@ import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import { ROOT } from '../src/book.js';
 import { prunedRoot, PRUNE_W, PRUNE_DEPTH } from './book-prune.mjs';
+import { BOOK_ZH } from './book-zh.mjs';
 
 const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = path.join(ROOT_DIR, 'src', 'zig', 'book.bin');
@@ -44,6 +45,19 @@ const OUT = path.join(ROOT_DIR, 'src', 'zig', 'book.bin');
 const src = fs.readFileSync(path.join(ROOT_DIR, 'src', 'book.js'), 'utf8');
 const NFAM = JSON.parse(src.match(/const NFAM = (\[.*?\]);/s)[1]);
 const AL = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_$';
+
+/* 双语断言:译名表与 NFAM 对齐(锚点抓三个最出名的,防止顺序错位) */
+if (BOOK_ZH.length !== NFAM.length) {
+  console.error(`✗ 译名表 ${BOOK_ZH.length} 条 ≠ NFAM ${NFAM.length} 条(book.js 变了要同步 book-zh.mjs)`);
+  process.exit(1);
+}
+for (const [en, zh] of [['Sicilian Defense', '西西里防御'], ['Ruy Lopez', '西班牙开局'], ["King's Indian Defense", '古印度防御']]) {
+  const i = NFAM.indexOf(en);
+  if (i < 0 || BOOK_ZH[i] !== zh) {
+    console.error(`✗ 译名锚点错位:${en} → ${BOOK_ZH[i] ?? '(缺)'}(期望 ${zh})`);
+    process.exit(1);
+  }
+}
 
 /* 剪枝:低流行(w≤PRUNE_W)且够长(≥PRUNE_DEPTH 手)的冷门理论尾巴整段收回,
  * 主流线不动;被截断的线只是更早出谱回落搜索。规则与阈值见 book-prune.mjs。 */
@@ -80,10 +94,11 @@ const emit = (key, node) => {
 };
 
 u16(NFAM.length);
-for (const nm of NFAM) {
-  const b = Buffer.from(nm, 'utf8');
-  u16(b.length);
-  chunks.push(b);
+for (let i = 0; i < NFAM.length; i++) {
+  const en = Buffer.from(NFAM[i], 'utf8');
+  const zh = Buffer.from(BOOK_ZH[i], 'utf8');
+  u16(en.length); chunks.push(en);
+  u16(zh.length); chunks.push(zh);
 }
 /* nodeCount 占位:记录**字节偏移**(不是 chunks 数组下标 —— concat 之后
  * 两者不同,写错位置会把名字区冲掉,解析全乱,踩过) */

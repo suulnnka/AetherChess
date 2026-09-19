@@ -82,7 +82,15 @@ send({ type: 'think', id: 10, moves: [], level: 2 });
 {
   const m = await nextMsg();
   ok(m.id === 10 && m.book === true && typeof m.name === 'string', `开局库命中:${m.name ?? '(无名谱线)'} ${m.depth === 0 ? 'depth=0' : ''}`);
+  ok(/[一-鿿]/.test(m.name || ''), '默认语言是中文(族名含汉字)');
   ok(m.move !== 0 && (m.move >> 6) !== (m.move & 63), '书着是完整编码');
+}
+
+/* lang:'en' → 英文族名 */
+send({ type: 'think', id: 13, moves: [], level: 2, lang: 'en' });
+{
+  const m = await nextMsg();
+  ok(m.id === 13 && m.book === true && !/[一-鿿]/.test(m.name || ''), `lang:'en' 回英文族名(${m.name})`);
 }
 
 /* ---- think:谱外进搜索(2.Ke2 王前冲,任何 ECO 谱线都不含)---- */

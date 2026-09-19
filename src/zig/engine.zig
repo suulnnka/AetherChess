@@ -216,13 +216,14 @@ var candBuf = [_]i32{0} ** (256 * 3); // 候选缓冲:每项 (line, pop, fam) �
 /// 谱着在当前局面不合法视为无谱,与 JS bookMove 同语义)。
 /// 返回完整着法编码;0 = 谱外/谱尽,调用方回落搜索。
 /// 名字经 engineBookNamePtr/Len 读出(这步棋进入的开局族,无名则 len=0)。
-export fn engineBookMove(seed: i32) i32 {
+export fn engineBookMove(seed: i32, lang: i32) i32 {
     ensureInit();
     bookName = null;
     const kids = book.walk(inBuf[0..loadedCount]) orelse return 0;
     const p = book.pick(kids, @bitCast(seed)) orelse return 0;
     const mv = bindLine(p.from, p.to) orelse return 0;
-    bookName = if (p.fam == book.FAM_NONE) null else book.famName(p.fam);
+    const lg: book.Lang = if (lang != 0) .zh else .en;
+    bookName = if (p.fam == book.FAM_NONE) null else book.famName(p.fam, lg);
     return mv;
 }
 export fn engineBookNamePtr() i32 {
@@ -234,10 +235,11 @@ export fn engineBookNameLen() i32 {
     return @intCast(nm.len);
 }
 
-/// 族下标 → 族名(探针对拍用):ptr 为 0 = 无名/越界
+/// 族下标 → 指定语言的族名(探针对拍用):ptr 为 0 = 无名/越界
 pub var famNameCache: ?[]const u8 = null;
-export fn engineBookFamName(fam: i32) i32 {
-    const nm = book.famName(@intCast(@max(fam, 0))) orelse {
+export fn engineBookFamName(fam: i32, lang: i32) i32 {
+    const lg: book.Lang = if (lang != 0) .zh else .en;
+    const nm = book.famName(@intCast(@max(fam, 0)), lg) orelse {
         famNameCache = null;
         return 0;
     };
