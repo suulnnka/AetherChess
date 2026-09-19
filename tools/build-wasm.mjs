@@ -56,7 +56,7 @@ console.log(`\n» zig-out/bin/chess.wasm → wasm/chess.wasm`);
 console.log(`  raw    ${String(raw.length).padStart(7)} B   ${kb(raw.length)}`);
 console.log(`  gzip   ${String(gz).padStart(7)} B   ${kb(gz)}`);
 console.log(`  brotli ${String(br).padStart(7)} B   ${kb(br)}`);
-console.log('  (webos 体积闸门:JS 侧国际象棋预算 35KB gzip;合并主干时把本产物 gzip 计入预算)');
+console.log('  (webos 体积闸门:国际象棋预算 50KB gzip = worker 胶水 + 本产物求和计费)');
 
 const passArg = (n) => (process.argv.includes(n) ? [n, process.argv[process.argv.indexOf(n) + 1]] : []);
 
