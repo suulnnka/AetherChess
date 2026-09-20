@@ -22,7 +22,14 @@ const QUEEN = rules.QUEEN;
 const KING = rules.KING;
 
 pub const N_EVAL_PARAMS = params.N;
-pub const P = &params.P;
+
+// 参数表:params.zig 里 i32 无损存储(拟合值全为整数码兵)。特征值与累加
+// 也全为整数 —— 量级:单项 |参数×特征| ≤ ~33k,|mg| ≤ ~6.3M,相位插值
+// ≤ ~3 亿 < 2^31,余量 7 倍;JS 参照的 f64 点积对这些整数恰好精确,
+// 除以 24 后向零截断与 @divTrunc 逐位相等 ⇒ 与 eval.js 仍逐位一致。
+pub inline fn pi(base: usize) i32 {
+    return params.P_I32[base];
+}
 
 pub const VAL_MG = 0;
 pub const VAL_EG = 5;
@@ -100,9 +107,6 @@ var zoneMark = [_]i32{0} ** 64;
 
 inline fn hsq32(t: i32) i32 {
     return (t >> 3) * 4 + @min(t & 7, 7 - (t & 7));
-}
-inline fn pAt(base: usize) f64 {
-    return P[base];
 }
 
 fn evalTerms(pos: *const rules.Position) void {
@@ -430,22 +434,22 @@ fn evalTerms(pos: *const rules.Position) void {
     curPhase = phase;
 }
 
-/// 局面分,返回「走子方视角」的厘兵值(与 evaluate() 全量路径逐位一致)
+/// 局面分,返回「走子方视角」的厘兵值(与 evaluate() 全量路径逐位一致)。
+/// 全整数运算:点积与相位插值都在 i32 里(量级证明见 pi 注释),JS 参照的
+/// f64 运算对这些整数恰好精确 ⇒ 结果仍逐位一致。
 pub fn evaluate(pos: *const rules.Position) i32 {
     evalTerms(pos);
-    var mg: f64 = 0;
+    var mg: i32 = 0;
     var i: usize = 0;
-    while (i < nT) : (i += 1) mg += pAt(@intCast(T_IDX[i])) * @as(f64, @floatFromInt(T_VAL[i]));
-    var sc: f64 = undefined;
+    while (i < nT) : (i += 1) mg += pi(@intCast(T_IDX[i])) * T_VAL[i];
+    var sc: i32 = undefined;
     if (curPhase == PHASE_MAX) {
         sc = mg;
     } else {
-        var eg: f64 = 0;
+        var eg: i32 = 0;
         i = 0;
-        while (i < nU) : (i += 1) eg += pAt(@intCast(U_IDX[i])) * @as(f64, @floatFromInt(U_VAL[i]));
-        sc = if (curPhase == 0) eg else (mg * @as(f64, @floatFromInt(curPhase)) + eg * @as(f64, @floatFromInt(PHASE_MAX - curPhase))) / @as(f64, PHASE_MAX);
+        while (i < nU) : (i += 1) eg += pi(@intCast(U_IDX[i])) * U_VAL[i];
+        sc = if (curPhase == 0) eg else @divTrunc(mg * curPhase + eg * @as(i32, PHASE_MAX - curPhase), PHASE_MAX);
     }
-    // JS:`sc < 0 ? -(-sc | 0) : (sc | 0)` —— 即向零截断
-    const v: i32 = @intFromFloat(@trunc(sc));
-    return if (pos.stm == WHITE) v else -v;
+    return if (pos.stm == WHITE) sc else -sc;
 }

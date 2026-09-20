@@ -188,7 +188,7 @@ var stopped: bool = false;
 var bestRoot: i32 = 0;
 
 inline fn tempo() i32 {
-    return @intFromFloat(eval.P[eval.TEMPO]);
+    return eval.pi(eval.TEMPO);
 }
 inline fn ttFlag(ti: usize) i32 {
     return TT[ti + 5] & 3;

@@ -1,11 +1,12 @@
 /* ============================================================
  * 从 src/eval.js 的 EVAL_P(调参拟合的 491 参数)生成 src/zig/params.zig。
  *
- * 为什么不手抄:491 个 f64 手抄必错;而且参数是拟合产物,以后重调参时
+ * 为什么不手抄:491 个参数手抄必错;而且参数是拟合产物,以后重调参时
  * 重跑本脚本即可同步 zig 侧。生成物入库(与 eval.js 一样是"源码")。
  *
- * 精度:用 String(x) 的最短往返十进制(Node 保证 round-trip),zig 解析
- * f64 字面量按 IEEE754 正确舍入 ⇒ 逐位一致。
+ * 精度:拟合值全为整数码兵 ⇒ i32 无损存储(省一半 wasm 文件字节);
+ * eval.zig 首次访问时转 f64 工作表,整数在 f64 中表示精确 ⇒ 仍与
+ * eval.js EVAL_P 逐位一致。出现非整数拟合值时直接报错,绝不静默丢精度。
  *
  * 用法:node tools/gen-params.mjs
  * ============================================================ */
@@ -28,8 +29,13 @@ if (EVAL_P.length !== N_EVAL_PARAMS) {
 
 const lines = [];
 for (let i = 0; i < EVAL_P.length; i++) {
-  const v = String(EVAL_P[i]);
-  lines.push(`  ${v.includes('.') || v.includes('e') ? v : v + '.0'},   // [${i}]`);
+  const v = EVAL_P[i];
+  if (!Number.isInteger(v) || v > 2147483647 || v < -2147483648) {
+    console.error(`✗ EVAL_P[${i}] = ${v} 不是 i32 整数 —— i32 存储会丢精度;`);
+    console.error('  要么调参器输出取整,要么把本生成器和 eval.zig 回退成 f64 存储');
+    process.exit(1);
+  }
+  lines.push(`  ${v},   // [${i}]`);
 }
 
 const head = `// ============================================================
@@ -40,9 +46,10 @@ const head = `// ============================================================
 // ============================================================
 pub const N = ${N_EVAL_PARAMS};
 
-/// 与 eval.js EVAL_P 逐位一致(f64 最短往返十进制)
-pub const P = [_]f64{
+/// i32 无损存储(拟合值全为整数码兵);eval.zig 首次访问时转 f64 工作表,
+/// 整数在 f64 中表示精确 ⇒ 与 eval.js EVAL_P 逐位一致
+pub const P_I32 = [_]i32{
 `;
 
 fs.writeFileSync(OUT, head + lines.join('\n') + '\n};\n');
-console.log(`✓ ${path.relative(ROOT, OUT)}(${N_EVAL_PARAMS} 参数,来自 eval.js 的拟合值)`);
+console.log(`✓ ${path.relative(ROOT, OUT)}(${N_EVAL_PARAMS} 参数,i32 存储,来自 eval.js 的拟合值)`);

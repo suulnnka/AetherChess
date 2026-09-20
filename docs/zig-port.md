@@ -55,7 +55,7 @@ src/zig/book.zig      开局谱库:二进制 blob 零拷贝游走(走谱/档位�
 src/zig/book.bin      谱库 blob(生成物:tools/gen-book.mjs 从 book.js 导出;节点 3 字节起 —— from/to/flags(bit7 族名 · bit6-5 流行度档 · bit0-4 孩子数)+ 可选族名字节。生成前经 book-prune.mjs 剪枝:摘除「w≤1 且 ≥10 手」的冷门理论尾巴,8652→5794 节点,被截断的线只是更早出谱回落搜索。名字区每族存**英/中两条** UTF-8,译名表 tools/book-zh.mjs 与 NFAM 下标对齐,显示语言由 worker 的 lang 参数选,默认中文)
 src/zig/engine.zig    wasm 导出层
 src/zig/selftest.zig  原生自测(perft/不变量/边角/战术/残局/谱库结构/NPS 基准)
-src/zig/params.zig    491 评估参数(生成物:tools/gen-params.mjs 从 eval.js 导出)
+src/zig/params.zig    491 评估参数(生成物:tools/gen-params.mjs 从 eval.js 导出;i32 无损存储,eval.zig 首访转 f64 工作表)
 build.zig             selftest(native)/ wasm / 单元测试 三个 step
 tools/build-wasm.mjs  zig build → wasm/chess.wasm(入库)→ 体积报告 → 跑探针
 tools/probe-wasm.mjs  跨语言对拍(四道关,见下)
