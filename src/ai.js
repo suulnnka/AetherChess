@@ -376,8 +376,11 @@ function search(pos, depth, alpha, beta, ply, canNull) {
 export function searchBest(pos, cfg) {
   // 增量评估默认不启用:JS 数组棋盘上每 make 的受影响子重扫(~3µs × 每节点 ~4 次 make)
   // 比它省下的全量评估(2.7µs/节点)更贵,实测 NPS 275k → 93k。
-  // 状态机与验证(test/incremental-test.mjs,4.2 万步逐位一致)保留,位棋板/WASM 化后可激活:
-  // 需要时 evAttach(pos) 即可。
+  // 状态机与验证(test/incremental-test.mjs,4.2 万步逐位一致)保留在 eval.js。
+  // "位棋板/WASM 化后可激活"已实测证伪(2026-09):Zig 全量移植(快照栈+差分
+  // 更新,逐位一致)后 nps 只有全量路径的 0.41× —— 这套评估的机动性/王区/
+  // 兵列都是全局交互项,每步差分脚印(受影响列重判+滑子重扫+~480B 快照)
+  // 远大于一次全量评估,不是实现语言问题。勿再试。
   nodes = 0; stopped = false; bestRoot = 0;
   nodeLimit = cfg.nodes || 40000;
   const t0 = nowFn();
