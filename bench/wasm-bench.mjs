@@ -70,7 +70,10 @@ if (!fs.existsSync(WASM) || !fs.existsSync(LOADER)) {
 }
 
 /* ---------- chessy 驱动 ---------- */
-const WasmEngine = require(LOADER);
+/* 本包 package.json 是 type:module,require 该 UMD loader 会按 ESM 加载:
+ * module.exports 分支不生效,工厂结果挂到 globalThis.WasmEngine —— 两种形态都兜住。 */
+const _ns = require(LOADER);
+const WasmEngine = typeof _ns?.load === 'function' ? _ns : globalThis.WasmEngine;
 const chessy = await WasmEngine.load(fs.readFileSync(WASM));
 
 /* ---------- 局面 → FEN ----------
