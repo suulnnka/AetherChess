@@ -68,8 +68,9 @@ export async function createEngine(wasmPath = WASM_PATH) {
       const wires = Array.from(new Int32Array(X.memory.buffer, X.engineLegalPtr(), X.engineLegalCount()));
       const legal = wires.map((w) => {
         const from = (w >> 6) & 63, to = w & 63;
-        /* legalOut 只有 from/to(升变只留升后,标志位被丢):兵到底线即升变 */
-        const promo = (board[from] & 7) === 1 && (to >> 3) === 0;
+        /* legalOut 只有 from/to(升变只留升后,标志位被丢):兵到任一底线即升变
+         * (棋盘 a8=0:白兵升变在 row 0,黑兵在 row 7) */
+        const promo = (board[from] & 7) === 1 && ((to >> 3) === 0 || (to >> 3) === 7);
         return { uci: sqName(from) + sqName(to) + (promo ? 'q' : ''), wire: w };
       });
       let over = false, result = null;
