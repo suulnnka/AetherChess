@@ -2,27 +2,19 @@
   "name": "aether-chess",
   "version": "1.0.0",
   "type": "module",
-  "description": "国际象棋引擎:JS 参照实现(零依赖、无 DOM,Node 与 Worker 通用)+ Zig/wasm 通道(main 分支,规则/评估/搜索全在 wasm);PVS/TT/静态搜索 + Texel 调参的 491 参数 HCE 评估",
-  "main": "src/ai.js",
+  "description": "国际象棋引擎:zig/wasm 单实现(规则/评估/搜索/开局谱库全在 wasm),PVS/TT/静态搜索 + 整数码兵 HCE 评估;src/worker.js 是 wasm 的唯一 JS 门面",
+  "main": "src/worker.js",
   "exports": {
-    ".": "./src/ai.js",
-    "./rules": "./src/rules.js",
-    "./ai": "./src/ai.js",
-    "./book": "./src/book.js",
-    "./eval": "./src/eval.js",
+    ".": "./src/worker.js",
     "./worker": "./src/worker.js",
     "./wasm": "./wasm/chess.wasm"
   },
   "scripts": {
-    "test": "node test/engine-test.mjs",
-    "test:quick": "node test/engine-test.mjs --quick",
-    "test:book": "node test/book-test.mjs",
-    "test:worker": "node tools/worker-test.mjs",
-    "selftest": "zig build selftest",
+    "test": "zig build test",
     "test:zig": "zig build test",
-    "build:wasm": "node tools/build-wasm.mjs",
-    "probe:wasm": "node tools/probe-wasm.mjs",
-    "gen:params": "node tools/gen-params.mjs"
+    "selftest": "zig build selftest && node -e \"const{spawnSync}=require('node:child_process');const p='zig-out/bin/selftest'+(process.platform==='win32'?'.exe':'');const r=spawnSync(p,{stdio:'inherit'});process.exit(r.status??1)\"",
+    "test:worker": "node tools/worker-test.mjs",
+    "build:wasm": "node tools/build-wasm.mjs"
   },
   "sideEffects": false,
   "license": "MIT",
@@ -33,9 +25,9 @@
   "keywords": [
     "chess",
     "engine",
-    "pvs",
-    "evaluation",
-    "texel-tuning"
+    "zig",
+    "wasm",
+    "pvs"
   ],
   "private": false
 }

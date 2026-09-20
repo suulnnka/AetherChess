@@ -1,15 +1,10 @@
 /* ============================================================
- * AI Worker:引擎的门面(UI 不 import 引擎源码,一切经消息)—— **zig/wasm 通道**
- *
- * 消息契约与 legacy_js 分支的 src/worker.js(JS 参照实现)**完全同一份**,UI、
- * 探针、对比脚本换实现都不用改;那边背后是 src/rules.js + src/ai.js,
- * 这边背后是 wasm/chess.wasm(zig 移植,见 src/zig/)。跨实现逐位一致性
- * 由 tools/probe-wasm.mjs 守住(评估/搜索/规则三重对拍)。
+ * AI Worker:引擎的唯一门面(UI 不 import 引擎源码,一切经消息)—— **zig/wasm**
  *
  *   ping                     → { type:'pong', tag, engine, evalCp }
  *                              (顺带强制加载 wasm:回包里能证明引擎真起来了)
  *   { type:'levels' }        → { type:'levels', tag, engine, default, levels }
- *                              纯声明难度表(数据在 levels.js),不触发任何加载
+ *                              纯声明难度表(内联数据),不触发任何加载
  *   { type:'state', id, moves }
  *                            → { type:'state', id, board, stm, legal, check,
  *                                over, result, winner }
@@ -25,22 +20,32 @@
  * 结构化克隆最省,编码只有一套,不存在两条解析路径。
  *
  * 分工:**规则/评估/搜索/开局谱库全在 wasm 里**(engineLoad 重演 →
- * engineState 查询 → engineThink 搜索 → engineBookMove 应谱;与黑白棋
- * wasm 通道当时的"JS 过渡规则层"不同,zig 工具链现成,一步到位下沉,
- * JS 侧零引擎代码、不可能与引擎吵架)。谱库是编译期嵌入的二进制 blob
- * (含 3800 条谱线与开局族名,tools/gen-book.mjs 从 book.js 生成);留在
- * JS 的只剩难度表 levels.js 一块纯数据,chunk 从 ~21KB 缩到 ~2KB。
+ * engineState 查询 → engineThink 搜索 → engineBookMove 应谱)。JS 参照实现
+ * (rules/eval/ai/book/levels)已于 2026-09 移除 —— 仓库里没有第二份引擎,
+ * 不存在两条实现路径吵架;跨实现对拍闸门由 zig 原生测试接替
+ * (zig build test / selftest,见 tools/build-wasm.mjs 的产物关卡)。
+ * 谱库是编译期嵌入的二进制 blob(wasm/chess.wasm 数据段,src/zig/book.zig
+ * @embedFile book.bin);JS 侧只剩本门面 + 内联难度表。
  *
- * wasm 没有墙钟,难度档的 ms 字段在 think 路径不生效 —— 节点预算是主约束
- * (levels.js 头注释的口径),wasm 下每档的耗时只会更短不会更长。
+ * wasm 没有墙钟,难度档的 ms 字段在 think 路径不生效 —— 节点预算是主约束,
+ * wasm 下每档的耗时只会更短不会更长。
  *
  * 搜索是同步的,Worker 收到新消息只会排队;UI 侧用请求序号丢弃过期结果,
  * 需要真正中断时直接 terminate 再造一个(见 webos 应用的 abortEngine)。
  * ============================================================ */
-import { LEVELS, DEFAULT_LEVEL } from './levels.js';
+
+/* 难度档:纯数据(节点预算按机器标定,见 git 历史里 src/levels.js 的口径注释)。
+ * 原独立文件随 JS 参照实现一起移除 —— 本 worker 是 wasm 的唯一门面,直接内联。 */
+const LEVELS = [
+  { id: 'easy', name: '初级', depth: 2, jitter: 70, nodes: 20000, ms: 200 },
+  { id: 'normal', name: '中级', depth: 24, jitter: 0, nodes: 40000, ms: 500 },
+  { id: 'hard', name: '高级', depth: 24, jitter: 0, nodes: 160000, ms: 900 },
+  { id: 'master', name: '大师', depth: 24, jitter: 0, nodes: 900000, ms: 3500 },
+];
+const DEFAULT_LEVEL = 2;
 
 /* ENGINE_TAG 让下游 webos 的体积闸门(check-size.mjs)能在 dist 里认出这个
- * chunk(字符串不会被压缩改名)。开局库数据内嵌在 book.js 里,计入预算。 */
+ * chunk(字符串不会被压缩改名)。开局库数据内嵌在 wasm(book.bin)里,计入预算。 */
 const ENGINE_TAG = 'chess-engine-v2';
 self.__engineTag = ENGINE_TAG;
 
@@ -135,9 +140,9 @@ function handle(d) {
       return;
     }
     /* 开局库优先:命中谱着直接回着,不再搜索。谱库是**编译期嵌进 wasm 的
-     * 二进制 blob**(tools/gen-book.mjs 从 book.js 生成,见 src/zig/book.zig),
+     * 二进制 blob**(src/zig/book.bin,book.zig @embedFile),
      * 走谱/加权抽取/绑定(升后优先)/开局族名全在引擎侧;谱着在当前局面
-     * 不合法时引擎回 0,回落搜索 —— 与 JS 版 bookMove 的语义一致。 */
+     * 不合法时引擎回 0,回落搜索。 */
     /* 开局族名双语:blob 每族存英/中两条,lang 选显示语言(0=英文 1=中文)。
      * 应用侧可在 think 请求里带 lang: 'en'|'zh',缺省中文(UI 中文为主)。 */
     const lang = d.lang === 'en' ? 0 : 1;

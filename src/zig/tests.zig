@@ -1,5 +1,5 @@
-//  单元测试(zig build test):把"与 JS 同源"钉死在几个从 src/rules.js/
-// src/eval.js 现场提取的参考值上 —— 这些值变了说明两侧任何一边漂了。
+//  单元测试(zig build test):把关键参考值(perft/评估/状态)钉死在常量上 ——
+//  值最初从初代 JS 参照实现提取(该实现已移除),漂了说明引擎行为变了。
 // 完整的 perft/战术/残局自测在 selftest(zig build selftest)。
 const std = @import("std");
 const rules = @import("rules.zig");

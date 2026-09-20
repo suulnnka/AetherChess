@@ -1,3 +1,8 @@
+> **历史文档(2026-09 注)**:本文写于 zig 移植期,当时的 JS 参照实现(rules/eval/ai/book)、
+> 逐位对拍闸门(tools/probe-wasm.mjs)与参数生成器(tools/gen-params.mjs)均已移除 ——
+> zig 是引擎唯一实现,正确性由 zig 原生测试 + 产物冒烟接替(见 README「单实现」一节)。
+> 本文保留作移植史与 wasm ABI 的记录。
+
 # Zig / wasm 移植(main 分支)
 
 > 状态:**完成,验证通过**(分支命名对齐 AetherOthello:main = 叠加了 Zig 实现的

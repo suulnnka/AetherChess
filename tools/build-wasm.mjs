@@ -5,10 +5,11 @@
  * 为什么入库:webos 侧 vite build 直接从源码树里 fetch 这个 .wasm
  *   (worker 里的 new URL('../wasm/chess.wasm', import.meta.url)),
  *   仓库里没有它就构建不起来。代价是**改了引擎必须重跑本脚本并提交**,
- *   所以脚本最后会跑 probe:评估/搜索与 JS 版逐位对拍,忘了重建或改漂了
- *   都会被拦住。
+ *   所以脚本最后会跑产物关卡:zig 原生测试(perft/规则/自检)+ wasm 冒烟
+ *   (实例化 → enginePerft 标准值 → engineThink 合法出招),忘了重建或
+ *   产物漂了都会被拦住。
  *
- * 用法:node tools/build-wasm.mjs [--skip-probe] [--games N] [--nodes N]
+ * 用法:node tools/build-wasm.mjs [--skip-probe]
  * 退出码:0 成功 / 1 构建或验证失败
  * ============================================================ */
 import fs from 'node:fs';
@@ -58,13 +59,10 @@ console.log(`  gzip   ${String(gz).padStart(7)} B   ${kb(gz)}`);
 console.log(`  brotli ${String(br).padStart(7)} B   ${kb(br)}`);
 console.log('  (webos 体积闸门:国际象棋预算 50KB gzip = worker 胶水 + 本产物求和计费)');
 
-const passArg = (n) => (process.argv.includes(n) ? [n, process.argv[process.argv.indexOf(n) + 1]] : []);
-
 if (!process.argv.includes('--skip-probe')) {
-  console.log('\n» 验证产物(node tools/probe-wasm.mjs)');
-  execFileSync(process.execPath, ['tools/probe-wasm.mjs', 'wasm/chess.wasm', ...passArg('--games'), ...passArg('--nodes')], {
-    stdio: 'inherit',
-    cwd: ROOT,
-  });
+  console.log('\n» zig 原生测试(zig build test:perft 标准值 / 规则 / 状态)');
+  execFileSync(ZIG, ['build', 'test'], { stdio: 'inherit', cwd: ROOT });
+  console.log('\n» wasm 产物冒烟(node tools/wasm-smoke.mjs)');
+  execFileSync(process.execPath, ['tools/wasm-smoke.mjs'], { stdio: 'inherit', cwd: ROOT });
 }
 console.log('\n✓ wasm 产物已就绪:wasm/chess.wasm');
