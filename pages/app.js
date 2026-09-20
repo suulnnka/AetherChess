@@ -353,10 +353,10 @@ function onEngineMsg(e) {
   if (d.type === 'pong' || d.id !== pendingId) return;      // 过期 / 无关消息
   if (d.error || !d.move) { pendingId = 0; searching = false; infoL.textContent = 'AI 无可用着法'; fetchState(); return; }
   if (d.book) {
-    // 引擎查谱命中:短暂延时落子让节奏像"想了一下";期间新对局 / 悔棋作废这次落子
+    // 引擎查谱命中:秒回立即落子(曾经的 350~800ms 垫延迟被判定为 bug)
     infoL.textContent = d.name ? `开局库 · ${d.name}` : '开局库';
-    const seq = reqSeq;
-    setTimeout(() => { if (seq !== reqSeq) return; searching = false; doMove(packedToWire(d.move)); }, 350 + Math.random() * 450);
+    pendingId = 0; searching = false;
+    doMove(packedToWire(d.move));
     return;
   }
   pendingId = 0; searching = false;
