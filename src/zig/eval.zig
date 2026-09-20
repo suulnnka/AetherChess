@@ -105,111 +105,286 @@ var PN_SQ = [_]i32{0} ** 32;
 var PN_COL = [_]i32{0} ** 32;
 var zoneMark = [_]i32{0} ** 64;
 
+// [融合变体] 发射点直接累加(MG/EG 槽),稀疏数组与点积循环删除;
+// 整数和与顺序无关 ⇒ 与发射+点积两段式逐位一致
+var mgAcc: i32 = 0;
+var egAcc: i32 = 0;
+
+// ---- 位棋盘实验:机动性/王区换 u64 ----
+// 马步掩码(全部目标,不过滤占用 —— 与原版 hits 口径一致)
+const KNIGHT_BB: [64]u64 = blk: {
+    var t: [64]u64 = [_]u64{0} ** 64;
+    var sq: usize = 0;
+    while (sq < 64) : (sq += 1) {
+        var i: usize = @intCast(rules.N_ATK_LO[sq]);
+        const e: usize = @intCast(rules.N_ATK_LO[sq + 1]);
+        while (i < e) : (i += 1) t[sq] |= @as(u64, 1) << @as(u6, @intCast(rules.N_ATK[i]));
+    }
+    break :blk t;
+};
+// RAY_D[dir][sq]:沿 4 条斜线的位掩码(不含源格,由近及远同 rules 射线表);
+// RAY_D_POS:射线是否向高位递增(选 ctz/clz 找最近阻挡格)
+const RAY_D: [4][64]u64 = blk: {
+    var t: [4][64]u64 = [_][64]u64{[_]u64{0} ** 64} ** 4;
+    var sq: usize = 0;
+    while (sq < 64) : (sq += 1) {
+        var d: usize = 0;
+        while (d < 4) : (d += 1) {
+            var i: usize = @intCast(rules.DIAG_SEG[sq * 4 + d]);
+            const e: usize = @intCast(rules.DIAG_SEG[sq * 4 + d + 1]);
+            while (i < e) : (i += 1) t[d][sq] |= @as(u64, 1) << @as(u6, @intCast(rules.DIAG_RAY[i]));
+        }
+    }
+    break :blk t;
+};
+const RAY_D_POS: [4][64]bool = blk: {
+    var t: [4][64]bool = [_][64]bool{[_]bool{false} ** 64} ** 4;
+    var sq: usize = 0;
+    while (sq < 64) : (sq += 1) {
+        var d: usize = 0;
+        while (d < 4) : (d += 1) {
+            const lo: usize = @intCast(rules.DIAG_SEG[sq * 4 + d]);
+            if (rules.DIAG_SEG[sq * 4 + d + 1] > rules.DIAG_SEG[sq * 4 + d])
+                t[d][sq] = rules.DIAG_RAY[lo] > @as(i8, @intCast(sq));
+        }
+    }
+    break :blk t;
+};
+// ---- [增量 v2·第一档] 逐子可分解项的增量维护 ----
+// STAT[pc<<6|sq] = 白方视角 (子力+PST),MG/EG 各一张;与位扫描版逐子累加逐位一致
+const STAT_MG: [1024]i32 = blk: {
+    @setEvalBranchQuota(1000000);
+    var t: [1024]i32 = [_]i32{0} ** 1024;
+    var pc: usize = 1;
+    while (pc < 16) : (pc += 1) {
+        const ty = pc & 7;
+        if (ty == 0 or ty == 7) continue;
+        const col = pc >> 3;
+        const sg: i32 = if (col == 0) 1 else -1;
+        const mgBase: usize = if (ty == 1) PST_MG_PAWN
+            else if (ty == 2) PST_MG_KNIGHT
+            else if (ty == 3) PST_MG_BISHOP
+            else if (ty == 4) PST_MG_ROOK
+            else if (ty == 5) PST_MG_QUEEN
+            else PST_MG_KING;
+        var sq: usize = 0;
+        while (sq < 64) : (sq += 1) {
+            const t2: i32 = if (col == 0) @intCast(sq) else @as(i32, @intCast(sq)) ^ 56;
+            if (ty == 6) {
+                t[(pc << 6) | sq] = sg * pi(PST_MG_KING + @as(usize, @intCast(t2)));
+            } else if (ty == 1) {
+                t[(pc << 6) | sq] = sg * (pi(VAL_MG) + pi(PST_MG_PAWN + @as(usize, @intCast(t2))));
+            } else {
+                const hm: i32 = hsq32(t2);
+                const egB: usize = if (ty == 2) PST_EG_KNIGHT else if (ty == 3) PST_EG_BISHOP else if (ty == 4) PST_EG_ROOK else PST_EG_QUEEN;
+                _ = egB;
+                t[(pc << 6) | sq] = sg * (pi(VAL_MG + (ty - 1)) + pi(mgBase + @as(usize, @intCast(if (ty == 1) t2 else hm))));
+            }
+        }
+    }
+    break :blk t;
+};
+const STAT_EG: [1024]i32 = blk: {
+    @setEvalBranchQuota(1000000);
+    var t: [1024]i32 = [_]i32{0} ** 1024;
+    var pc: usize = 1;
+    while (pc < 16) : (pc += 1) {
+        const ty = pc & 7;
+        if (ty == 0 or ty == 7) continue;
+        const col = pc >> 3;
+        const sg: i32 = if (col == 0) 1 else -1;
+        var sq: usize = 0;
+        while (sq < 64) : (sq += 1) {
+            const t2: i32 = if (col == 0) @intCast(sq) else @as(i32, @intCast(sq)) ^ 56;
+            const hm: i32 = hsq32(t2);
+            if (ty == 6) {
+                t[(pc << 6) | sq] = sg * pi(PST_EG_KING + @as(usize, @intCast(hm)));
+            } else if (ty == 1) {
+                t[(pc << 6) | sq] = sg * (pi(VAL_EG) + pi(PST_EG_PAWN + @as(usize, @intCast(hm))));
+            } else {
+                t[(pc << 6) | sq] = sg * (pi(VAL_EG + (ty - 1)) + pi(PST_EG_KNIGHT + @as(usize, @intCast((ty - 2) * 32 + hm))));
+            }
+        }
+    }
+    break :blk t;
+};
+pub var incMG: i32 = 0;
+pub var incEG: i32 = 0;
+pub var incPhase: i32 = 0;
+pub var incWB: i32 = 0;
+pub var incBB: i32 = 0;
+const INC_CAP = 600;
+var snapMG: [INC_CAP]i32 = undefined;
+var snapEG: [INC_CAP]i32 = undefined;
+var snapPH: [INC_CAP]i32 = undefined;
+var snapWB: [INC_CAP]i32 = undefined;
+var snapBB: [INC_CAP]i32 = undefined;
+var snapTop: usize = 0;
+var snapPly: [INC_CAP]i32 = undefined;
+
+/// 全量重建(recomputeKeys 路径调用)
+pub fn incRebuild(pos: *const rules.Position) void {
+    var mg2: i32 = 0;
+    var eg2: i32 = 0;
+    var ph: i32 = 0;
+    var wb2: i32 = 0;
+    var bb2: i32 = 0;
+    var pc: usize = 1;
+    while (pc < 16) : (pc += 1) {
+        const ty = pc & 7;
+        if (ty == 0 or ty == 7) continue;
+        var set = pos.pcBB[pc];
+        while (set != 0) {
+            const sq = @ctz(set);
+            set &= set - 1;
+            mg2 += STAT_MG[(pc << 6) | sq];
+            eg2 += STAT_EG[(pc << 6) | sq];
+            ph += PHASE_W[ty];
+            if (ty == BISHOP) {
+                if (pc >> 3 == 0) wb2 += 1 else bb2 += 1;
+            }
+        }
+    }
+    incMG = mg2;
+    incEG = eg2;
+    incPhase = ph;
+    incWB = wb2;
+    incBB = bb2;
+    snapTop = 0;
+}
+
+/// make 尾调用:按本步事件差分(与 rules.make 的 BB XOR 同一组事件)
+pub fn incAfterMake(pos: *const rules.Position, m: i32) void {
+    if (snapTop >= INC_CAP) {
+        incRebuild(pos);
+        return;
+    }
+    snapPly[snapTop] = pos.ply;
+    snapMG[snapTop] = incMG;
+    snapEG[snapTop] = incEG;
+    snapPH[snapTop] = incPhase;
+    snapWB[snapTop] = incWB;
+    snapBB[snapTop] = incBB;
+    snapTop += 1;
+    const from: usize = rules.mFrom(m);
+    const to: usize = rules.mTo(m);
+    const f = rules.mFlag(m);
+    const cap = rules.mCap(m);
+    const pcPost = pos.b[to];
+    const col = pcPost >> 3;
+    const tyPre: i32 = if (f >= 6) PAWN else pcPost & 7;
+    const pcPre = (col << 3) | tyPre;
+    incMG += STAT_MG[(@as(usize, @intCast(pcPost)) << 6) | to] - STAT_MG[(@as(usize, @intCast(pcPre)) << 6) | from];
+    incEG += STAT_EG[(@as(usize, @intCast(pcPost)) << 6) | to] - STAT_EG[(@as(usize, @intCast(pcPre)) << 6) | from];
+    incPhase += PHASE_W[@intCast(pcPost & 7)] - PHASE_W[@intCast(tyPre)];
+    if (tyPre == BISHOP) {
+        if (col == WHITE) incWB -= 1 else incBB -= 1;
+    }
+    if ((pcPost & 7) == BISHOP) {
+        if (col == WHITE) incWB += 1 else incBB += 1;
+    }
+    if (cap != 0) {
+        const cs2: usize = if (f == 5)
+            @intCast(@as(i32, @intCast(to)) + (if (col == WHITE) @as(i32, 8) else @as(i32, -8)))
+        else
+            to;
+        incMG -= STAT_MG[(@as(usize, @intCast(cap)) << 6) | cs2];
+        incEG -= STAT_EG[(@as(usize, @intCast(cap)) << 6) | cs2];
+        incPhase -= PHASE_W[@intCast(cap & 7)];
+        if ((cap & 7) == BISHOP) {
+            if ((cap >> 3) == WHITE) incWB -= 1 else incBB -= 1;
+        }
+    }
+    if (f == 2 or f == 3) {
+        const rf: usize = if (f == 2) to + 1 else to - 2;
+        const rt: usize = if (f == 2) to - 1 else to + 1;
+        const rk = pos.b[rt];
+        incMG += STAT_MG[(@as(usize, @intCast(rk)) << 6) | rt] - STAT_MG[(@as(usize, @intCast(rk)) << 6) | rf];
+        incEG += STAT_EG[(@as(usize, @intCast(rk)) << 6) | rt] - STAT_EG[(@as(usize, @intCast(rk)) << 6) | rf];
+    }
+}
+
+/// unmake 头调用:弹快照(ply 校验,失配自愈重建)
+pub fn incBeforeUnmake(pos: *const rules.Position) void {
+    if (snapTop > 0 and snapPly[snapTop - 1] == pos.ply) {
+        snapTop -= 1;
+        incMG = snapMG[snapTop];
+        incEG = snapEG[snapTop];
+        incPhase = snapPH[snapTop];
+        incWB = snapWB[snapTop];
+        incBB = snapBB[snapTop];
+    } else {
+        incRebuild(pos);
+    }
+}
+pub fn incPushNull(pos: *const rules.Position) void {
+    if (snapTop >= INC_CAP) {
+        return;
+    }
+    snapPly[snapTop] = pos.ply;
+    snapMG[snapTop] = incMG;
+    snapEG[snapTop] = incEG;
+    snapPH[snapTop] = incPhase;
+    snapWB[snapTop] = incWB;
+    snapBB[snapTop] = incBB;
+    snapTop += 1;
+}
+
+// 棋子集直接用 pos.pcBB / pos.occ(引擎增量维护)
+
 inline fn hsq32(t: i32) i32 {
     return (t >> 3) * 4 + @min(t & 7, 7 - (t & 7));
 }
 
 fn evalTerms(pos: *const rules.Position) void {
-    const b = &pos.b;
     nT = 0;
     nU = 0;
+    mgAcc = incMG;
+    egAcc = incEG;
     @memset(&wPawnM, 0);
     @memset(&bPawnM, 0);
     @memset(&wPawnF, 0);
     @memset(&bPawnF, 0);
     @memset(&wAtkRow, 0);
     @memset(&bAtkRow, 0);
-    var wCnt = [_]i32{0} ** 7;
-    var bCnt = [_]i32{0} ** 7;
-    var phase: i32 = 0;
-    var wb: i32 = 0;
-    var bb: i32 = 0;
     var np: usize = 0;
     var npn: usize = 0;
 
-    var s: usize = 0;
-    while (s < 64) : (s += 1) {
-        const p = b[s];
-        if (p == 0) continue;
-        const col = p >> 3;
-        const ty = p & 7;
-        const t: i32 = if (col == WHITE) @intCast(s) else @as(i32, @intCast(s)) ^ 56;
-        const sg: i32 = if (col == WHITE) 1 else -1;
-        if (col == WHITE) wCnt[@intCast(ty)] += 1 else bCnt[@intCast(ty)] += 1;
-        phase += PHASE_W[@intCast(ty)];
-        if (ty == PAWN) {
-            const f: usize = s & 7;
-            const r: i32 = @intCast(s >> 3);
-            if (col == WHITE) {
-                wPawnF[f] += 1;
-                wPawnM[f] |= @as(i32, 1) << @intCast(r);
-                if (r - 1 >= 0) {
-                    const bits = (if (f > 0) @as(i32, 1) << @intCast(f - 1) else 0) |
-                        (if (f < 7) @as(i32, 1) << @intCast(f + 1) else 0);
-                    wAtkRow[@intCast(r - 1)] |= bits;
-                }
-            } else {
-                bPawnF[f] += 1;
-                bPawnM[f] |= @as(i32, 1) << @intCast(r);
-                if (r + 1 < 8) {
-                    const bits = (if (f > 0) @as(i32, 1) << @intCast(f - 1) else 0) |
-                        (if (f < 7) @as(i32, 1) << @intCast(f + 1) else 0);
-                    bAtkRow[@intCast(r + 1)] |= bits;
+    // 位扫描遍历(pcBB,引擎增量维护;只碰有子的格,整数和与顺序无关)
+    {
+        var col: usize = 0;
+        while (col < 2) : (col += 1) {
+            var ty: usize = 1;
+            while (ty <= 6) : (ty += 1) {
+                var set = pos.pcBB[(col << 3) | ty];
+                while (set != 0) {
+                    const sq2: usize = @ctz(set);
+                    set &= set - 1;
+                    if (ty == PAWN) {
+                        const f2: usize = sq2 & 7;
+                        const r2: i32 = @intCast(sq2 >> 3);
+                        if (col == 0) {
+                            wPawnF[f2] += 1;
+                            wPawnM[f2] |= @as(i32, 1) << @intCast(r2);
+                        } else {
+                            bPawnF[f2] += 1;
+                            bPawnM[f2] |= @as(i32, 1) << @intCast(r2);
+                        }
+                        PN_SQ[npn] = @intCast(sq2);
+                        PN_COL[npn] = @intCast(col);
+                        npn += 1;
+                    } else if (ty != KING) {
+                        PC_SQ[np] = @intCast(sq2);
+                        PC_TY[np] = @intCast(ty);
+                        PC_COL[np] = @intCast(col);
+                        np += 1;
+                    }
                 }
             }
-            PN_SQ[npn] = @intCast(s);
-            PN_COL[npn] = col;
-            npn += 1;
-            T_IDX[nT] = PST_MG_PAWN + t;
-            T_VAL[nT] = sg;
-            nT += 1;
-            U_IDX[nU] = PST_EG_PAWN + hsq32(t);
-            U_VAL[nU] = sg;
-            nU += 1;
-        } else if (ty == KNIGHT or ty == BISHOP or ty == ROOK or ty == QUEEN) {
-            PC_SQ[np] = @intCast(s);
-            PC_TY[np] = ty;
-            PC_COL[np] = col;
-            np += 1;
-            const mgBase: i32 = switch (ty) {
-                KNIGHT => PST_MG_KNIGHT,
-                BISHOP => PST_MG_BISHOP,
-                ROOK => PST_MG_ROOK,
-                else => PST_MG_QUEEN,
-            };
-            const egBase: i32 = PST_EG_KNIGHT + @as(i32, ty - KNIGHT) * 32;
-            T_IDX[nT] = mgBase + hsq32(t);
-            T_VAL[nT] = sg;
-            nT += 1;
-            U_IDX[nU] = egBase + hsq32(t);
-            U_VAL[nU] = sg;
-            nU += 1;
-            if (ty == BISHOP) {
-                if (col == WHITE) wb += 1 else bb += 1;
-            }
-        } else { // KING
-            T_IDX[nT] = PST_MG_KING + t;
-            T_VAL[nT] = sg;
-            nT += 1;
-            U_IDX[nU] = PST_EG_KING + hsq32(t);
-            U_VAL[nU] = sg;
-            nU += 1;
         }
     }
 
-    // 子力(P..Q,王无子力项)
-    var mty: i8 = PAWN;
-    while (mty <= QUEEN) : (mty += 1) {
-        const d = wCnt[@intCast(mty)] - bCnt[@intCast(mty)];
-        if (d != 0) {
-            T_IDX[nT] = VAL_MG + (mty - PAWN);
-            T_VAL[nT] = d;
-            nT += 1;
-            U_IDX[nU] = VAL_EG + (mty - PAWN);
-            U_VAL[nU] = d;
-            nU += 1;
-        }
-    }
+    // 子力:已并入增量维护(STAT 含 VAL),材料差值段删除
 
     // 兵结构:叠兵 / 孤立兵(特征方向 = 敌方缺陷 − 己方缺陷,权重为正即罚分幅值)
     var wDoub: i32 = 0;
@@ -230,24 +405,16 @@ fn evalTerms(pos: *const rules.Position) void {
         if (bf != 0 and bl == 0 and br == 0) bIso += bf;
     }
     if (wDoub != bDoub) {
-        T_IDX[nT] = DOUBLED_MG;
-        T_VAL[nT] = bDoub - wDoub;
-        nT += 1;
-        U_IDX[nU] = DOUBLED_EG;
-        U_VAL[nU] = bDoub - wDoub;
-        nU += 1;
+        mgAcc += pi(@intCast(DOUBLED_MG)) * (bDoub - wDoub);
+        egAcc += pi(@intCast(DOUBLED_EG)) * (bDoub - wDoub);
     }
     if (wIso != bIso) {
-        T_IDX[nT] = ISOLATED_MG;
-        T_VAL[nT] = bIso - wIso;
-        nT += 1;
-        U_IDX[nU] = ISOLATED_EG;
-        U_VAL[nU] = bIso - wIso;
-        nU += 1;
+        mgAcc += pi(@intCast(ISOLATED_MG)) * (bIso - wIso);
+        egAcc += pi(@intCast(ISOLATED_EG)) * (bIso - wIso);
     }
 
     // 王盾(只在还有中局成分时计入;残局王要出去干活)
-    if (phase > 8) {
+    if (incPhase > 8) {
         var wMiss: i32 = 0;
         var bMiss: i32 = 0;
         var col: usize = 0;
@@ -268,21 +435,15 @@ fn evalTerms(pos: *const rules.Position) void {
             if (col == 0) wMiss = miss else bMiss = miss;
         }
         if (wMiss != bMiss) {
-            T_IDX[nT] = SHIELD_MG;
-            T_VAL[nT] = bMiss - wMiss;
-            nT += 1;
+            mgAcc += pi(@intCast(SHIELD_MG)) * (bMiss - wMiss);
         }
     }
 
     // 双象
-    const pair: i32 = (if (wb >= 2) @as(i32, 1) else 0) - (if (bb >= 2) @as(i32, 1) else 0);
+    const pair: i32 = (if (incWB >= 2) @as(i32, 1) else 0) - (if (incBB >= 2) @as(i32, 1) else 0);
     if (pair != 0) {
-        T_IDX[nT] = PAIR_MG;
-        T_VAL[nT] = pair;
-        nT += 1;
-        U_IDX[nU] = PAIR_EG;
-        U_VAL[nU] = pair;
-        nU += 1;
+        mgAcc += pi(@intCast(PAIR_MG)) * (pair);
+        egAcc += pi(@intCast(PAIR_EG)) * (pair);
     }
 
     // 通路兵:前方三列(含本列)无敌兵 ⇒ 按相对横线计(白兵横线 = 8−r,黑兵 = r+1)
@@ -314,124 +475,99 @@ fn evalTerms(pos: *const rules.Position) void {
         const rank: i32 = if (col == WHITE) 8 - r else r + 1;
         if (rank < 2 or rank > 7) continue; // 1/8 横线不可达
         const sg: i32 = if (col == WHITE) 1 else -1;
-        T_IDX[nT] = PASSED_MG + rank - 2;
-        T_VAL[nT] = sg;
-        nT += 1;
-        U_IDX[nU] = PASSED_EG + rank - 2;
-        U_VAL[nU] = sg;
-        nU += 1;
+        mgAcc += pi(@intCast(PASSED_MG + rank - 2)) * (sg);
+        egAcc += pi(@intCast(PASSED_EG + rank - 2)) * (sg);
     }
 
-    // 机动性 + 王区威胁 融合扫描(单次射线遍历同时做两件事)
-    var wAtk = [_]i32{0} ** 4; // 按 攻击方子的类型:马 象 车 后
+    // 机动性 + 王区威胁(位棋盘版:攻击集一次算出,计数走 popcount;
+    // 口径与射线版逐位一致 —— 马目标不过滤占用算 hits、滑子射线到第一阻挡格
+    // 含阻挡格、车恒 0、后只斜线)
+    var wAtk = [_]i32{0} ** 4;
     var bAtk = [_]i32{0} ** 4;
     if (np > 0) {
-        // 两个王的危险区可能重叠(王相距两格),用位标志共存:bit0 = 白王区,bit1 = 黑王区
-        @memset(&zoneMark, 0);
-        var zc: usize = 0;
-        while (zc < 2) : (zc += 1) {
-            const ks: usize = @intCast(pos.ks[zc]);
-            const kr: i32 = @intCast(ks >> 3);
-            const kc: i32 = @intCast(ks & 7);
-            const bit: i32 = if (zc == 0) 1 else 2;
-            var dr: i32 = -1;
-            while (dr <= 1) : (dr += 1) {
-                var dc: i32 = -1;
-                while (dc <= 1) : (dc += 1) {
-                    const r = kr + dr;
-                    const c = kc + dc;
-                    if (r < 0 or r > 7 or c < 0 or c > 7) continue;
-                    zoneMark[@intCast(r * 8 + c)] |= bit;
-                }
-            }
-        }
-        i = 0;
-        while (i < np) : (i += 1) {
-            const s2: usize = @intCast(PC_SQ[i]);
-            const ty = PC_TY[i];
-            const col = PC_COL[i];
-            const r0: i32 = @intCast(s2 >> 3);
-            const c0: i32 = @intCast(s2 & 7);
-            const atk = if (col == WHITE) &bAtkRow else &wAtkRow;
-            const zone: i32 = if (col == WHITE) 2 else 1; // 白子攻黑王区,黑子攻白王区
-            var n: i32 = 0;
-            var hits = false;
-            if (ty == KNIGHT) {
-                var k: usize = 0;
-                while (k < 16) : (k += 2) {
-                    const r = r0 + ND8[k];
-                    const c = c0 + ND8[k + 1];
-                    if (r < 0 or r > 7 or c < 0 or c > 7) continue;
-                    const q: usize = @intCast(r * 8 + c);
-                    if (zoneMark[q] & zone != 0) hits = true; // 马的攻击目标不过滤占用(与原版一致)
-                    const v = b[q];
-                    if (v != 0 and (v >> 3) == col) continue;
-                    if (((atk[@intCast(r)] >> @intCast(c)) & 1) == 0) n += 1;
-                }
-            } else {
-                // ⚠ 特征定义的历史缺陷(bug 兼容,见 eval.js fusedPiece 的注释与
-                // docs/chess-eval-training-report.md 附录 E):evalTerms 的滑子扫描
-                // 以 k<16 索引 8 元素的 DD4/OD4,正交方向全部落空 ⇒ 车的机动性
-                // 恒 0、后只数斜线,王区命中同理。全部训练与 A/B 都在这套特征
-                // 定义上完成,权重与之绑定 —— 这里必须**原样复刻**:只走 4 条
-                // 斜线(象/后),车不产生机动性与王区命中。修复需重生成数据
-                // 重拟合后才能放开。
-                const diag = ty == BISHOP or ty == QUEEN;
-                if (diag) {
-                    var k: usize = 0;
-                    while (k < 8) : (k += 2) {
-                        const dr = DD4[k];
-                        const dc = DD4[k + 1];
-                        var r = r0 + dr;
-                        var c = c0 + dc;
-                        while (r >= 0 and r < 8 and c >= 0 and c < 8) {
-                            const q: usize = @intCast(r * 8 + c);
-                            if (zoneMark[q] & zone != 0) hits = true; // 途经或阻挡格在王区 ⇒ 命中
-                            const v = b[q];
-                            if (v == 0) {
-                                if (((atk[@intCast(r)] >> @intCast(c)) & 1) == 0) n += 1;
-                            } else {
-                                if ((v >> 3) != col and ((atk[@intCast(r)] >> @intCast(c)) & 1) == 0) n += 1;
-                                break;
-                            }
-                            r += dr;
-                            c += dc;
-                        }
+        const FILE_A: u64 = 0x0101010101010101;
+        const FILE_H: u64 = 0x8080808080808080;
+        // 敌兵攻击集:白兵向低行(row-1)咬,sq-9/sq-7;黑兵反之
+        const wPawnAtkBB = ((pos.pcBB[1] & ~FILE_A) >> 9) | ((pos.pcBB[1] & ~FILE_H) >> 7);
+        const bPawnAtkBB = ((pos.pcBB[9] & ~FILE_A) << 7) | ((pos.pcBB[9] & ~FILE_H) << 9);
+        // 两王危险区(含王格,与原 zoneMark 同集)
+        var zoneW: u64 = 0;
+        var zoneB: u64 = 0;
+        {
+            var zc: usize = 0;
+            while (zc < 2) : (zc += 1) {
+                const ks: usize = @intCast(pos.ks[zc]);
+                const kr: i32 = @intCast(ks >> 3);
+                const kc: i32 = @intCast(ks & 7);
+                var dr: i32 = -1;
+                while (dr <= 1) : (dr += 1) {
+                    var dc: i32 = -1;
+                    while (dc <= 1) : (dc += 1) {
+                        const r2 = kr + dr;
+                        const c2 = kc + dc;
+                        if (r2 < 0 or r2 > 7 or c2 < 0 or c2 > 7) continue;
+                        const bit = @as(u64, 1) << @as(u6, @intCast(r2 * 8 + c2));
+                        if (zc == 0) zoneW |= bit else zoneB |= bit;
                     }
                 }
             }
+        }
+        const occ = pos.occ[0] | pos.occ[1];
+        var piece_i: usize = 0;
+        while (piece_i < np) : (piece_i += 1) {
+            const sq2: usize = @intCast(PC_SQ[piece_i]);
+            const ty = PC_TY[piece_i];
+            const col = PC_COL[piece_i];
+            const own = if (col == WHITE) pos.occ[0] else pos.occ[1];
+            const pawnAtk = if (col == WHITE) bPawnAtkBB else wPawnAtkBB;
+            const zone = if (col == WHITE) zoneB else zoneW;
+            var n: i32 = 0;
+            var hits = false;
+            var atkBB: u64 = 0;
+            if (ty == KNIGHT) {
+                atkBB = KNIGHT_BB[sq2];
+                hits = (atkBB & zone) != 0;
+                n = @intCast(@popCount(atkBB & ~own & ~pawnAtk));
+            } else if (ty == BISHOP or ty == QUEEN) {
+                var d2: usize = 0;
+                while (d2 < 4) : (d2 += 1) {
+                    const ray = RAY_D[d2][sq2];
+                    const blockers = ray & occ;
+                    if (blockers == 0) {
+                        atkBB |= ray;
+                    } else {
+                        const first: usize = if (RAY_D_POS[d2][sq2])
+                            @as(usize, @ctz(blockers))
+                        else
+                            @as(usize, 63) - @as(usize, @clz(blockers));
+                        atkBB |= ray ^ RAY_D[d2][first];
+                    }
+                }
+                hits = (atkBB & zone) != 0;
+                n = @intCast(@popCount(atkBB & ~own & ~pawnAtk));
+            }
             const sg: i32 = if (col == WHITE) 1 else -1;
             if (n != 0) {
-                T_IDX[nT] = MOB_MG + (ty - KNIGHT);
-                T_VAL[nT] = sg * n;
-                nT += 1;
-                U_IDX[nU] = MOB_EG + (ty - KNIGHT);
-                U_VAL[nU] = sg * n;
-                nU += 1;
+                mgAcc += pi(@intCast(MOB_MG + (ty - KNIGHT))) * (sg * n);
+                egAcc += pi(@intCast(MOB_EG + (ty - KNIGHT))) * (sg * n);
             }
             if (hits) {
                 if (col == WHITE) wAtk[@intCast(ty - KNIGHT)] += 1 else bAtk[@intCast(ty - KNIGHT)] += 1;
             }
         }
-        @memset(&zoneMark, 0);
         var k: usize = 0;
         while (k < 4) : (k += 1) {
             if (wAtk[k] != bAtk[k]) {
-                T_IDX[nT] = KATK + @as(i32, @intCast(k));
-                T_VAL[nT] = wAtk[k] - bAtk[k];
-                nT += 1;
+                mgAcc += pi(@intCast(KATK + @as(i32, @intCast(k)))) * (wAtk[k] - bAtk[k]);
             }
         }
         const wTot = @min(wAtk[0] + wAtk[1] + wAtk[2] + wAtk[3], 8);
         const bTot = @min(bAtk[0] + bAtk[1] + bAtk[2] + bAtk[3], 8);
         if (wTot != bTot) {
-            T_IDX[nT] = KATK + 4;
-            T_VAL[nT] = wTot - bTot;
-            nT += 1;
+            mgAcc += pi(@intCast(KATK + 4)) * (wTot - bTot);
         }
     }
-
-    curPhase = phase;
+    curPhase = incPhase;
 }
 
 /// 局面分,返回「走子方视角」的厘兵值(与 evaluate() 全量路径逐位一致)。
@@ -439,17 +575,11 @@ fn evalTerms(pos: *const rules.Position) void {
 /// f64 运算对这些整数恰好精确 ⇒ 结果仍逐位一致。
 pub fn evaluate(pos: *const rules.Position) i32 {
     evalTerms(pos);
-    var mg: i32 = 0;
-    var i: usize = 0;
-    while (i < nT) : (i += 1) mg += pi(@intCast(T_IDX[i])) * T_VAL[i];
     var sc: i32 = undefined;
     if (curPhase == PHASE_MAX) {
-        sc = mg;
+        sc = mgAcc;
     } else {
-        var eg: i32 = 0;
-        i = 0;
-        while (i < nU) : (i += 1) eg += pi(@intCast(U_IDX[i])) * U_VAL[i];
-        sc = if (curPhase == 0) eg else @divTrunc(mg * curPhase + eg * @as(i32, PHASE_MAX - curPhase), PHASE_MAX);
+        sc = if (curPhase == 0) egAcc else @divTrunc(mgAcc * curPhase + egAcc * @as(i32, PHASE_MAX - curPhase), PHASE_MAX);
     }
     return if (pos.stm == WHITE) sc else -sc;
 }

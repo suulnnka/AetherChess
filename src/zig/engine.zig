@@ -1,3 +1,4 @@
+const magic = @import("magic.zig");
 // wasm 导出层:C ABI,**零导入零分配**(freestanding),对齐 AetherOthello 的
 // engine.zig 约定:所有导出只返回数字或静态缓冲指针,不抛异常。
 //
@@ -28,6 +29,8 @@ var loadedCount: usize = 0; // 最近一次 engineLoad 的步数(开局库按线
 fn ensureInit() void {
     if (!inited) {
         pos = rules.newPos();
+        // 预热 magic 攻击表(乘数搜索 ~400ms):放 boot 期,首次应手不吃这笔
+        magic.init();
         inited = true;
     }
 }

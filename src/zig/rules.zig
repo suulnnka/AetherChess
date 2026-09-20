@@ -1,3 +1,5 @@
+const magic = @import("magic.zig");
+const evalmod = @import("eval.zig");
 //  ============================================================
 // 国际象棋棋规引擎(zig 通道)—— src/rules.js 的逐句移植。
 //
@@ -247,6 +249,11 @@ pub const Position = struct {
     ply: i32 = 0,
     undo: [6 * UNDO_CAP]i32 = [_]i32{0} ** (6 * UNDO_CAP),
 
+    // 位棋盘(引擎增量维护):pcBB[(颜色<<3)|型],occ[0/1] = 白/黑全体占位。
+    // b(mailbox) 仍是规则层的权威表示,genMoves 未改;BB 供评估(位扫描出特征)。
+    pcBB: [16]u64 = [_]u64{0} ** 16,
+    occ: [2]u64 = .{ 0, 0 },
+
     /// hist[i](i 从新到旧,0 = 最近一次走子前)
     inline fn histAt(pos: *const Position, i: usize) i32 {
         return pos.hist[i & pos.histMask];
@@ -271,7 +278,24 @@ pub fn newPos() Position {
 }
 
 /// 全量重算哈希(初始化与测试用;搜索路径上只用增量)
+/// 从 mailbox 全量重建位棋盘(初始化/测试路径;搜索路径只走 make/unmake 的 XOR 增量)
+pub fn rebuildBB(pos: *Position) void {
+    @memset(&pos.pcBB, 0);
+    pos.occ[0] = 0;
+    pos.occ[1] = 0;
+    var sq: usize = 0;
+    while (sq < 64) : (sq += 1) {
+        const p = pos.b[sq];
+        if (p == 0) continue;
+        const bit = @as(u64, 1) << @as(u6, @intCast(sq));
+        pos.pcBB[@intCast(p)] |= bit;
+        pos.occ[@intCast(p >> 3)] |= bit;
+    }
+}
+
 pub fn recomputeKeys(pos: *Position) i32 {
+    rebuildBB(pos);
+    evalmod.incRebuild(pos);
     var a: i32 = 0;
     var bb: i32 = 0;
     var s: usize = 0;
@@ -364,13 +388,17 @@ pub fn inCheckOf(pos: *const Position, color: i8) bool {
 // 走法生成(伪合法;合法性由 isLegal / genLegal 过滤)
 // ============================================================
 pub fn genMoves(pos: *Position, out: []i32) usize {
+    magic.ensure();
     const b = &pos.b;
     const stm = pos.stm;
+    const own = pos.occ[@intCast(stm)];
+    const occ = pos.occ[0] | pos.occ[1];
     var n: usize = 0;
-    var sq: usize = 0;
-    while (sq < 64) : (sq += 1) {
+    var set = own;
+    while (set != 0) {
+        const sq: usize = @ctz(set);
+        set &= set - 1;
         const pc = b[sq];
-        if (pc == 0 or (pc >> 3) != stm) continue;
         const ty = pc & 7;
         const r: i32 = @intCast(sq >> 3);
         const c: i32 = @intCast(sq & 7);
@@ -399,7 +427,7 @@ pub fn genMoves(pos: *Position, out: []i32) usize {
             var dc: i32 = -1;
             while (dc <= 1) : (dc += 2) {
                 const cc = c + dc;
-                if (cc < 0 or cc > 7) continue; // 列越界检查同时也是"不绕行"的保证
+                if (cc < 0 or cc > 7) continue;
                 const t2 = t + dc;
                 if (t2 < 0 or t2 > 63) continue;
                 const tp = b[@intCast(t2)];
@@ -420,46 +448,48 @@ pub fn genMoves(pos: *Position, out: []i32) usize {
                     n += 1;
                 }
             }
-        } else if (ty == KNIGHT or ty == KING) {
-            const dirs = if (ty == KNIGHT) &ND else &KD;
-            var i: usize = 0;
-            while (i < 16) : (i += 2) {
-                const rr = r + dirs[i];
-                const cc = c + dirs[i + 1];
-                if (rr < 0 or rr > 7 or cc < 0 or cc > 7) continue;
-                const t: usize = @intCast(rr * 8 + cc);
+        } else if (ty == KING) {
+            var atk = magic.KING_BB[sq] & ~own;
+            while (atk != 0) {
+                const t: usize = @ctz(atk);
+                atk &= atk - 1;
                 const tp = b[t];
-                if (tp != 0 and (tp >> 3) == stm) continue;
                 out[n] = if (tp != 0)
                     mkMove(@intCast(sq), @intCast(t), F_CAP, tp)
                 else
                     mkMove(@intCast(sq), @intCast(t), F_QUIET, 0);
                 n += 1;
             }
-            if (ty == KING) {
-                const hb: i32 = if (stm == WHITE) 56 else 0;
-                if (sq == @as(usize, @intCast(hb + 4))) {
-                    const kR: i8 = if (stm == WHITE) C_WK else C_BK;
-                    const qR: i8 = if (stm == WHITE) C_WQ else C_BQ;
-                    if ((pos.castle & kR) != 0 and b[@intCast(hb + 7)] == piece(stm, ROOK) and b[@intCast(hb + 5)] == 0 and b[@intCast(hb + 6)] == 0) {
-                        out[n] = mkMove(@intCast(sq), @intCast(hb + 6), F_OO, 0);
-                        n += 1;
-                    }
-                    if ((pos.castle & qR) != 0 and b[@intCast(hb)] == piece(stm, ROOK) and b[@intCast(hb + 1)] == 0 and b[@intCast(hb + 2)] == 0 and b[@intCast(hb + 3)] == 0) {
-                        out[n] = mkMove(@intCast(sq), @intCast(hb + 2), F_OOO, 0);
-                        n += 1;
-                    }
+            const hb: i32 = if (stm == WHITE) 56 else 0;
+            if (sq == @as(usize, @intCast(hb + 4))) {
+                const kR: i8 = if (stm == WHITE) C_WK else C_BK;
+                const qR: i8 = if (stm == WHITE) C_WQ else C_BQ;
+                if ((pos.castle & kR) != 0 and b[@intCast(hb + 7)] == piece(stm, ROOK) and b[@intCast(hb + 5)] == 0 and b[@intCast(hb + 6)] == 0) {
+                    out[n] = mkMove(@intCast(sq), @intCast(hb + 6), F_OO, 0);
+                    n += 1;
+                }
+                if ((pos.castle & qR) != 0 and b[@intCast(hb)] == piece(stm, ROOK) and b[@intCast(hb + 1)] == 0 and b[@intCast(hb + 2)] == 0 and b[@intCast(hb + 3)] == 0) {
+                    out[n] = mkMove(@intCast(sq), @intCast(hb + 2), F_OOO, 0);
+                    n += 1;
                 }
             }
         } else {
-            // 象 / 车 / 后:按方向射线
-            if (ty == BISHOP or ty == QUEEN) {
-                var i: usize = 0;
-                while (i < 8) : (i += 2) n = rayWalk(b, sq, DD[i], DD[i + 1], stm, out, n);
-            }
-            if (ty == ROOK or ty == QUEEN) {
-                var i: usize = 0;
-                while (i < 8) : (i += 2) n = rayWalk(b, sq, OD[i], OD[i + 1], stm, out, n);
+            // 马 / 象 / 车 / 后:攻击集一次成形,串行化
+            var atk: u64 = switch (ty) {
+                KNIGHT => magic.KNIGHT_BB[sq],
+                BISHOP => magic.bishAtk(sq, occ),
+                ROOK => magic.rookAtk(sq, occ),
+                else => magic.bishAtk(sq, occ) | magic.rookAtk(sq, occ),
+            } & ~own;
+            while (atk != 0) {
+                const t: usize = @ctz(atk);
+                atk &= atk - 1;
+                const tp = b[t];
+                out[n] = if (tp != 0)
+                    mkMove(@intCast(sq), @intCast(t), F_CAP, tp)
+                else
+                    mkMove(@intCast(sq), @intCast(t), F_QUIET, 0);
+                n += 1;
             }
         }
     }
@@ -607,9 +637,36 @@ pub fn make(pos: *Position, m: i32) void {
     bb ^= ZB[1024];
     pos.keyA = a;
     pos.keyB = bb;
+
+    // 位棋盘增量(XOR;unmake 走同一组 XOR,自反)
+    {
+        const bitF = @as(u64, 1) << @as(u6, @intCast(from));
+        const bitT = @as(u64, 1) << @as(u6, @intCast(to));
+        pos.pcBB[@intCast(pc)] ^= bitF;
+        pos.pcBB[@intCast(b[to])] ^= bitT;
+        pos.occ[@intCast(col)] ^= bitF ^ bitT;
+        if (cap != 0) {
+            const cs2: usize = if (f == F_EP)
+                @intCast(@as(i32, @intCast(to)) + (if (col == WHITE) @as(i32, 8) else @as(i32, -8)))
+            else
+                to;
+            const bitC = @as(u64, 1) << @as(u6, @intCast(cs2));
+            pos.pcBB[@intCast(cap)] ^= bitC;
+            pos.occ[@intCast(col ^ 1)] ^= bitC;
+        }
+        if (f == F_OO or f == F_OOO) {
+            const rf: usize = if (f == F_OO) to + 1 else to - 2;
+            const rt: usize = if (f == F_OO) to - 1 else to + 1;
+            const bits = (@as(u64, 1) << @as(u6, @intCast(rf))) ^ (@as(u64, 1) << @as(u6, @intCast(rt)));
+            pos.pcBB[@intCast(b[rt])] ^= bits;
+            pos.occ[@intCast(col)] ^= bits;
+        }
+    }
+    evalmod.incAfterMake(pos, m);
 }
 
 pub fn unmake(pos: *Position, m: i32) void {
+    evalmod.incBeforeUnmake(pos);
     pos.ply -= 1;
     pos.histLen -= 1;
     const k: usize = @intCast(pos.ply * 6);
@@ -650,6 +707,31 @@ pub fn unmake(pos: *Position, m: i32) void {
     pos.keyA = u[k + 4];
     pos.keyB = u[k + 5];
     pos.stm ^= 1;
+
+    // 位棋盘增量(与 make 同一组 XOR,自反)
+    {
+        const bitF = @as(u64, 1) << @as(u6, @intCast(from));
+        const bitT = @as(u64, 1) << @as(u6, @intCast(to));
+        pos.pcBB[@intCast(np)] ^= bitT;
+        const pcBack = if (f >= 6) piece(col, PAWN) else np;
+        pos.pcBB[@intCast(pcBack)] ^= bitF;
+        pos.occ[@intCast(col)] ^= bitF ^ bitT;
+        if (cap != 0) {
+            const cs2: usize = if (f == F_EP)
+                @intCast(@as(i32, @intCast(to)) + (if (col == WHITE) @as(i32, 8) else @as(i32, -8)))
+            else
+                to;
+            const bitC = @as(u64, 1) << @as(u6, @intCast(cs2));
+            pos.pcBB[@intCast(cap)] ^= bitC;
+            pos.occ[@intCast(col ^ 1)] ^= bitC;
+        }
+        if (f == F_OO or f == F_OOO) {
+            const rf: usize = if (f == F_OO) to + 1 else to - 2;
+            const rt: usize = if (f == F_OO) to - 1 else to + 1;
+            pos.pcBB[@intCast(b[rf])] ^= (@as(u64, 1) << @as(u6, @intCast(rf))) ^ (@as(u64, 1) << @as(u6, @intCast(rt)));
+            pos.occ[@intCast(col)] ^= (@as(u64, 1) << @as(u6, @intCast(rf))) ^ (@as(u64, 1) << @as(u6, @intCast(rt)));
+        }
+    }
 }
 
 /// 空着(不走子,只把走子权交出去)。仅空着剪枝用,外面不要调用。
@@ -677,9 +759,11 @@ pub fn makeNull(pos: *Position) void {
     pos.keyB = bb;
     pos.stm ^= 1;
     pos.half += 1;
+    evalmod.incPushNull(pos);
 }
 
 pub fn unmakeNull(pos: *Position) void {
+    evalmod.incBeforeUnmake(pos);
     pos.ply -= 1;
     pos.histLen -= 1;
     const k: usize = @intCast(pos.ply * 6);

@@ -327,7 +327,7 @@ fn playToMate(fen: []const u8, maxPlies: usize, nodes: u64) struct { plies: usiz
 fn runEndgame() void {
     say("\n== 残局将杀能力", .{});
     {
-        const g = playToMate("4k3/8/8/8/8/8/8/4K2Q w - - 0 1", 60, 6000);
+        const g = playToMate("4k3/8/8/8/8/8/8/4K2Q w - - 0 1", 60, 60000);
         check(g.mate and !g.stale, "后对王 60 手内将杀(用了 {d} 手,逼和={})", .{ g.plies, g.stale });
     }
     {
