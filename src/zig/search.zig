@@ -176,7 +176,7 @@ var SCORE = std.mem.zeroes([MAX_PLY + 4][256]i32);
 var KILLER = [_]i32{0} ** (MAX_PLY * 2);
 var HIST = [_]i32{0} ** (16 * 64);
 
-const TT_BITS = 18;
+const TT_BITS = 19;
 const TT_SIZE = 1 << TT_BITS;
 const TT_MASK = TT_SIZE - 1;
 pub var TT = [_]i32{0} ** (TT_SIZE * 6); // keyA / keyB / move / score / depth / flag|age

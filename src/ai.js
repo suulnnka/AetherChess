@@ -145,7 +145,7 @@ for (let i = 0; i < MAX_PLY + 4; i++) { BUF.push(new Int32Array(256)); SCORE.pus
 const KILLER = new Int32Array(MAX_PLY * 2);
 const HIST = new Int32Array(16 * 64);
 
-const TT_BITS = 18, TT_SIZE = 1 << TT_BITS, TT_MASK = TT_SIZE - 1;
+const TT_BITS = 19, TT_SIZE = 1 << TT_BITS, TT_MASK = TT_SIZE - 1;
 const TT = new Int32Array(TT_SIZE * 6);      // keyA / keyB / move / score / depth / flag|age
 let ttAge = 1;
 
