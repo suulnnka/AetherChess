@@ -170,6 +170,7 @@ let searching = false;
 let levels = [];                      // 难度表由**引擎自报**({type:'levels'})
 let levelIdx = 0;
 let levelsP = null;
+let bookName = '';                    // 本局最近一次带名书着的族名;无名谱着沿用它显示(见 think 回包)
 let levelsResolve = null;
 
 const aiColor = () => humanColor ^ 1;
@@ -283,6 +284,12 @@ function checkEnd(d) {
 
 /* ---------- AI:搜索跑在 Worker 里(zig → wasm 通道)---------- */
 let worker = null, reqSeq = 0, pendingId = 0, stateSeq = 0, statePending = null;
+let thinkT0 = 0, moveTimer = 0;   // 应手节奏:thinkAI 发出请求的时刻 / 补足定时器句柄
+/* AI 应手节奏下限(ms):与 webos 应用同一套「立即开想、落子前补足差额」——
+ * 搜索慢(深算)时全额占用、一点不叠垫;秒回(开局书/浅搜)时补足下限再落。
+ * 历史上这里是「秒回立即落子」(更早是 350~800ms 死垫,被判定为 bug 移除);
+ * 补足式在 UI 层与 webos 侧对齐,秒回不再瞬移。 */
+const MIN_AI_MS = 260;
 
 /** AI 回包的 move 是引擎打包编码(from 在低 6 位),转回线格式 (from<<6|to) */
 const packedToWire = (m) => ((m & 63) << 6) | ((m >> 6) & 63);
@@ -352,21 +359,39 @@ function onEngineMsg(e) {
   }
   if (d.type === 'pong' || d.id !== pendingId) return;      // 过期 / 无关消息
   if (d.error || !d.move) { pendingId = 0; searching = false; infoL.textContent = 'AI 无可用着法'; fetchState(); return; }
+  const wire = packedToWire(d.move);
+  pendingId = 0;
   if (d.book) {
-    // 引擎查谱命中:秒回立即落子(曾经的 350~800ms 垫延迟被判定为 bug)
-    infoL.textContent = d.name ? `开局库 · ${d.name}` : '开局库';
-    pendingId = 0; searching = false;
-    doMove(packedToWire(d.move));
+    // 引擎查谱命中:信息先亮,落子照走 holdMove 的最短应答节奏;
+    // 作废防护同普通着法 —— id 过期即丢。
+    // 无名谱着(谱树深处 ECO 未再细分)沿用本局最近族名:无名 ≠ 离开该开局
+    if (d.name) bookName = d.name;
+    infoL.textContent = bookName ? `开局库 · ${bookName}` : '开局库';
+    holdMove(d.id, wire);
     return;
   }
-  pendingId = 0; searching = false;
   infoL.textContent = `${lvName()} · 深度 ${d.depth} · ${Math.round(d.nodes / 1000)}k 节点 · ${d.ms}ms · ${fmtScore(d.score)}`;
-  doMove(packedToWire(d.move));
+  holdMove(d.id, wire);
+}
+
+/** AI 应手落子前的节奏垫:引擎秒回(开局书命中 / 浅搜)时不足 MIN_AI_MS 的
+ *  补足再落。等待期间 searching 保持 true(锁盘、状态行仍是思考中);
+ *  作废防护与在途搜索同一套 —— abortEngine 会 reqSeq++,迟到回调对不上号就整着丢弃。 */
+function holdMove(id, wire) {
+  const rest = MIN_AI_MS - (performance.now() - thinkT0);
+  if (rest <= 0) { searching = false; doMove(wire); return; }
+  moveTimer = setTimeout(() => {
+    moveTimer = 0;
+    if (id !== reqSeq) return;
+    searching = false;
+    doMove(wire);
+  }, rest);
 }
 
 function killWorker() {
   if (worker) { worker.terminate(); worker = null; }
   pendingId = 0; searching = false;
+  if (moveTimer) { clearTimeout(moveTimer); moveTimer = 0; }   // 正在垫的应手一并作废
   if (statePending) { const p = statePending; statePending = null; p(null); }
 }
 
@@ -415,6 +440,7 @@ async function thinkAI() {
   if (!ensureWorker()) return;
   const id = ++reqSeq;
   pendingId = id;
+  thinkT0 = performance.now();     // 应手节奏从这里计时,holdMove 垫的就是这段
   worker.postMessage({ id, moves: moves.slice(), level: levelIdx });
 }
 
@@ -425,6 +451,7 @@ function resetGame() {
   moves = [];
   sel = null; legal = [];
   gameOver = false;
+  bookName = '';             // 上局的开局族名不带进新局
   syncPieces(); showHighlights(); updateStatus();
   fetchState();                                   // 初始局面事实照问引擎
   if (vsAI && stm === aiColor()) thinkAI();       // 换边后玩家执黑时,AI 执白先行
@@ -439,6 +466,7 @@ function doUndo() {
   while (n-- > 0 && moves.length) moves.pop();
   gameOver = false;
   sel = null; legal = [];
+  bookName = '';             // 撤回后名字可能已细化过头,清掉等带名书着重建
   stm = moves.length % 2 === 0 ? WHITE : BLACK;   // 仅作过渡,回包会再校正
   syncPieces(); showHighlights();
   fetchState();
