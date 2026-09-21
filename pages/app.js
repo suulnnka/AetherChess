@@ -176,6 +176,17 @@ let levelsResolve = null;
 const aiColor = () => humanColor ^ 1;
 const lvName = () => levels[levelIdx]?.name ?? '—';
 
+/* 终局弹窗缓冲(600ms):终局画面先落地,给玩家一点反应时间再弹结算。
+ * 缓冲期里的新对局 / 悔棋 / 换边 / 人机切换都调 cancelEndDlg 取消 ——
+ * 不然这些操作之后还会蹦出上一局的结算框。 */
+const END_DLG_MS = 600;
+let endDlgTimer = 0;
+const cancelEndDlg = () => { clearTimeout(endDlgTimer); endDlgTimer = 0; };
+const popEndDlg = (show) => {
+  cancelEndDlg();
+  endDlgTimer = setTimeout(() => { endDlgTimer = 0; show(); }, END_DLG_MS);
+};
+
 const statusL = el('span', {}, '白方行棋');
 const infoL = el('span', {
   class: 'mono', style: { fontSize: '11px' },
@@ -275,7 +286,8 @@ function checkEnd(d) {
   if (!title) { updateStatus(); return false; }
   gameOver = true;
   abortEngine();
-  showDialog({ title, message: msg });
+  /* 结算弹窗缓一拍:让玩家看清终局盘面再弹;缓冲期里的操作会取消它 */
+  popEndDlg(() => showDialog({ title, message: msg }));
   statusL.textContent = line;
   setTitle('国际象棋');
   toast('国际象棋:' + line);
@@ -446,6 +458,7 @@ async function thinkAI() {
 
 function resetGame() {
   abortEngine();
+  cancelEndDlg();
   board = new Array(64).fill(0);
   stm = WHITE; legalAll = []; checkNow = false;
   moves = [];
@@ -461,6 +474,7 @@ function resetGame() {
 function doUndo() {
   if (!moves.length) return;
   abortEngine();
+  cancelEndDlg();
   let n = 1;
   if (vsAI && stm === humanColor && moves.length >= 2) n = 2;
   while (n-- > 0 && moves.length) moves.pop();
@@ -477,6 +491,7 @@ function doUndo() {
 /** 换边:与 AI 互换执子方,棋盘随之翻转 */
 function switchSide() {
   abortEngine();
+  cancelEndDlg();
   humanColor ^= 1;
   sel = null; legal = [];
   render2d();
@@ -499,6 +514,7 @@ const levelSel = el('select', {
 const aiBtn = el('button', {
   class: 'btn', title: '切换人机 / 双人对战',
   onClick: (e) => {
+    cancelEndDlg();
     vsAI = !vsAI;
     e.currentTarget.replaceChildren(vsAI ? '人机' : '双人');
     sideBtn.disabled = !vsAI;                                  // 换边只对人机模式有意义
